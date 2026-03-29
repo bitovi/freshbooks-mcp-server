@@ -454,7 +454,7 @@ export async function startHttpServer() {
     console.log(`  OAuth callback:  ${getOAuthCallbackUri()}`);
     if (config.server.https) {
       console.log();
-      console.log('Self-signed cert — visit https://localhost:3000 and accept the warning');
+      console.log(`Self-signed cert — visit ${config.server.url} and accept the warning`);
       console.log('before opening the OAuth URL in the same browser.');
     }
   }
