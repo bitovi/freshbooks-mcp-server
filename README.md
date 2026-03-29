@@ -67,12 +67,12 @@ FRESHBOOKS_CLIENT_SECRET=your_client_secret
 
 This is the simplest way to use the server. Claude Desktop communicates with it directly over stdio — no HTTP server or public URL required.
 
-### 1. Get a FreshBooks access token
+### 1. Get a FreshBooks refresh token
 
 Start the HTTP server to complete the OAuth flow once:
 
 ```bash
-npm run dev:http
+sudo npm run dev:http
 ```
 
 In a separate terminal, print the auth URL:
@@ -81,11 +81,19 @@ In a separate terminal, print the auth URL:
 npm run auth-url
 ```
 
-Open the printed URL in your browser. After logging in with FreshBooks, the page will display your session token. Copy the **FreshBooks access token** and add it to `.env`:
+Open the printed URL in your browser and log in with FreshBooks. After authenticating, the FreshBooks tokens are saved to `~/.freshbooks-mcp/sessions.json`. Copy the `refresh_token` value from that file:
+
+```bash
+cat ~/.freshbooks-mcp/sessions.json
+```
+
+Add it to `.env`:
 
 ```
-FRESHBOOKS_ACCESS_TOKEN=your_access_token
+FRESHBOOKS_REFRESH_TOKEN=your_refresh_token
 ```
+
+The server exchanges this for an access token on startup and handles renewal automatically — you only need to do this once unless you revoke the app's access in FreshBooks.
 
 ### 2. Add to Claude Desktop
 
