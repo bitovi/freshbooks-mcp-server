@@ -21,6 +21,9 @@
  */
 
 import https from 'node:https';
+import { writeFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import axios from 'axios';
@@ -263,6 +266,11 @@ export function createHttpServer() {
       res.status(500).send('Failed to exchange authorization code with FreshBooks');
       return;
     }
+
+    // Persist to tokens.json so the stdio server (Claude Desktop) picks up the new token
+    const tokenDir = join(homedir(), '.freshbooks-mcp');
+    await mkdir(tokenDir, { recursive: true });
+    await writeFile(join(tokenDir, 'tokens.json'), JSON.stringify(tokens, null, 2), { mode: 0o600 });
 
     // Issue our own session token
     const sessionToken = randomUUID();
