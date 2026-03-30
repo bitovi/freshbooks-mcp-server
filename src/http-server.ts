@@ -269,45 +269,39 @@ export function createHttpServer() {
     sessionStore.set(sessionToken, tokens);
 
     if (isLocalTest) {
+      const tokenRow = (id: string, label: string, subtitle: string, value: string, envKey?: string) => `
+          <h3>${label} <small style="font-weight:normal;color:#666">(${subtitle})</small></h3>
+          <div style="display:flex;align-items:center;gap:0.5rem;background:#f4f4f4;border:1px solid #ddd;border-radius:4px;padding:0.5rem 0.75rem">
+            <input id="${id}" type="password" readonly value="${value}"
+              style="flex:1;border:none;background:transparent;font-family:monospace;font-size:0.9rem;outline:none" />
+            <button onclick="toggle('${id}','eye_${id}')" style="background:none;border:none;cursor:pointer;padding:0;line-height:1" title="Show/hide">
+              <span id="eye_${id}">👁</span>
+            </button>
+            <button onclick="copy('${id}','copy_${id}')" style="background:none;border:none;cursor:pointer;padding:0;line-height:1" title="Copy">
+              <span id="copy_${id}">📋</span>
+            </button>
+          </div>
+          ${envKey ? `<p style="font-family:monospace;font-size:0.8rem;color:#555;margin:0.25rem 0 1.25rem">${envKey}=...</p>` : '<p style="margin:0.25rem 0 1.25rem"></p>'}
+      `;
+
       res.send(`
         <html>
         <body style="font-family:sans-serif;padding:2rem;max-width:640px">
           <h2>✅ Authenticated with FreshBooks</h2>
 
-          <h3>Refresh token <small style="font-weight:normal;color:#666">(add to .env — never expires)</small></h3>
-          <div style="display:flex;align-items:center;gap:0.5rem;background:#f4f4f4;border:1px solid #ddd;border-radius:4px;padding:0.5rem 0.75rem">
-            <input id="refresh" type="password" readonly value="${tokens.refresh_token}"
-              style="flex:1;border:none;background:transparent;font-family:monospace;font-size:0.9rem;outline:none" />
-            <button onclick="toggle('refresh','eyeR')" style="background:none;border:none;cursor:pointer;padding:0;line-height:1" title="Show/hide">
-              <span id="eyeR">👁</span>
-            </button>
-            <button onclick="copy('refresh','copyR')" style="background:none;border:none;cursor:pointer;padding:0;line-height:1" title="Copy">
-              <span id="copyR">📋</span>
-            </button>
-          </div>
-          <p style="font-family:monospace;font-size:0.8rem;color:#555;margin:0.25rem 0 1.25rem">FRESHBOOKS_REFRESH_TOKEN=...</p>
-
-          <h3>Access token <small style="font-weight:normal;color:#666">(add to .env — expires in ~12 hours)</small></h3>
-          <div style="display:flex;align-items:center;gap:0.5rem;background:#f4f4f4;border:1px solid #ddd;border-radius:4px;padding:0.5rem 0.75rem">
-            <input id="access" type="password" readonly value="${tokens.access_token}"
-              style="flex:1;border:none;background:transparent;font-family:monospace;font-size:0.9rem;outline:none" />
-            <button onclick="toggle('access','eyeA')" style="background:none;border:none;cursor:pointer;padding:0;line-height:1" title="Show/hide">
-              <span id="eyeA">👁</span>
-            </button>
-            <button onclick="copy('access','copyA')" style="background:none;border:none;cursor:pointer;padding:0;line-height:1" title="Copy">
-              <span id="copyA">📋</span>
-            </button>
-          </div>
-          <p style="font-family:monospace;font-size:0.8rem;color:#555;margin:0.25rem 0 1.25rem">FRESHBOOKS_ACCESS_TOKEN=...</p>
+          ${tokenRow('session', 'Session token', 'use with curl or claude.ai SSE connector', sessionToken)}
+          ${tokenRow('refresh', 'Refresh token', 'add to .env — never expires', tokens.refresh_token, 'FRESHBOOKS_REFRESH_TOKEN')}
+          ${tokenRow('access', 'Access token', 'add to .env — expires in ~12 hours', tokens.access_token, 'FRESHBOOKS_ACCESS_TOKEN')}
 
           <hr style="margin:1.5rem 0">
           <p style="color:#555;font-size:0.9rem">
             For Claude Desktop, use <code>FRESHBOOKS_REFRESH_TOKEN</code> — the server renews the access token automatically.<br><br>
-            SSE endpoint (for claude.ai connector): <code>${config.server.url}/sse</code>
+            Test the SSE endpoint:<br>
+            <code>curl -sk ${config.server.url}/sse -H "Authorization: Bearer &lt;session token&gt;"</code>
           </p>
 
           <script>
-            function toggle(id, eyeId) {
+            function toggle(id) {
               const input = document.getElementById(id);
               input.type = input.type === 'password' ? 'text' : 'password';
             }

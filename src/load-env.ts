@@ -6,9 +6,13 @@
  * which may use an older Node that doesn't support that flag).
  */
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export function loadEnv(path: string = resolve(process.cwd(), '.env')) {
+// Resolve relative to the compiled file (dist/load-env.js → project root)
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+export function loadEnv(path: string = resolve(projectRoot, '.env')) {
   let contents: string;
   try {
     contents = readFileSync(path, 'utf8');

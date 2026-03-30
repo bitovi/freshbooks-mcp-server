@@ -38,8 +38,10 @@ async function saveTokens(tokens: StoredTokens): Promise<void> {
 }
 
 async function refreshIfNeeded(tokens: StoredTokens): Promise<StoredTokens> {
-  if (!config.freshbooks.clientId || !config.freshbooks.clientSecret) return tokens;
   if (tokens.expires_at - Date.now() > 60_000) return tokens;
+  if (!config.freshbooks.clientId || !config.freshbooks.clientSecret) {
+    throw new Error('Token is expired and FRESHBOOKS_CLIENT_ID/SECRET are not set — cannot refresh.');
+  }
 
   const { data } = await axios.post(config.freshbooks.tokenUrl, {
     grant_type: 'refresh_token',
