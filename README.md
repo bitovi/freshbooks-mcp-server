@@ -1,6 +1,6 @@
 # FreshBooks MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for the [FreshBooks API](https://www.freshbooks.com/api). Connect Claude to your FreshBooks account to read and write invoices, clients, expenses, payments, projects, and time entries.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for the [FreshBooks API](https://www.freshbooks.com/api). Connect Claude to your FreshBooks account to read invoices, clients, expenses, projects, and more, and to manage payments and time entries.
 
 Supports two modes:
 - **stdio** — for Claude Desktop and MCP Inspector (no server needed)
@@ -13,25 +13,14 @@ Supports two modes:
 | `get_current_user` | Get the authenticated user's profile and account/business IDs |
 | `list_clients` | List clients with optional search and filters |
 | `get_client` | Get a client by ID |
-| `create_client` | Create a new client |
-| `update_client` | Update a client |
-| `delete_client` | Soft-delete a client |
 | `list_invoices` | List invoices filtered by client, status, or date range |
 | `get_invoice` | Get an invoice by ID including line items |
-| `create_invoice` | Create an invoice with line items |
-| `update_invoice` | Update an invoice's status, due date, or notes |
-| `send_invoice` | Email an invoice to the client |
 | `list_expenses` | List expenses filtered by client, project, or date range |
 | `get_expense` | Get an expense by ID |
-| `create_expense` | Create an expense |
-| `update_expense` | Update an expense |
 | `list_payments` | List payments filtered by invoice or date range |
 | `get_payment` | Get a payment by ID |
-| `create_payment` | Record a payment against an invoice |
 | `list_projects` | List projects filtered by client or active status |
 | `get_project` | Get a project by ID |
-| `create_project` | Create a project |
-| `update_project` | Update a project |
 | `list_time_entries` | List time entries filtered by project, client, or date range |
 | `get_time_entry` | Get a time entry by ID |
 | `create_time_entry` | Log a time entry against a project |
