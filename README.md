@@ -117,7 +117,7 @@ Restart Claude Desktop. The FreshBooks tools will appear in the hammer menu in t
 
 ## claude.ai Custom Connector (HTTP + SSE)
 
-Claude.ai custom connectors require a public HTTPS URL. You can test the connector locally with a trusted self-signed cert, use [ngrok](https://ngrok.com/) or [deploy to AWS](#deploying-to-aws-ec2--nginx).
+Claude.ai custom connectors require a public HTTPS URL. You can test the connector with [ngrok](https://ngrok.com/) or by [a deploy to AWS](#deploying-to-aws-ec2--nginx).
 
 ### Testing locally
 
@@ -153,9 +153,9 @@ Open the printed URL in your browser, log in with FreshBooks, and you'll see you
 curl -sk https://localhost:3443/sse -H "Authorization: Bearer <session_token>"
 ```
 
-### Testing with ngrok
+### Setting up ngrok
 
-If you want to test in claude.ai locally with a real certificate:
+If you want to test in claude.ai locally with a real certificate, use ngrok:
 
 ```bash
 # Add to .env:
@@ -175,7 +175,6 @@ Add `https://your-subdomain.ngrok-free.app/oauth/callback` to your FreshBooks ap
 Go to **Settings → Integrations → Add Integration** and enter your SSE URL:
 
 ```
-https://localhost:3443/sse         # local (with self-signed cert accepted in browser)
 https://your-subdomain.ngrok-free.app/sse   # ngrok
 https://freshbooks-mcp.yourdomain.com/sse   # production
 ```
