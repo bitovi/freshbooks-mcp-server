@@ -22,12 +22,12 @@ export const config = {
     mode: (process.env.MODE ?? 'stdio') as 'stdio' | 'http',
     // Set HTTPS=false when running behind a reverse proxy / ngrok that handles TLS
     https: process.env.HTTPS !== 'false',
-    // Default port: 443 for HTTPS, 3000 for plain HTTP (behind a proxy)
+    // Default port: 3443 for HTTPS (no sudo needed), 3000 for plain HTTP (behind a proxy)
     get port() {
-      return parseInt(process.env.PORT ?? (this.https ? '443' : '3000'), 10);
+      return parseInt(process.env.PORT ?? (this.https ? '3443' : '3000'), 10);
     },
     // Public base URL — used to build the OAuth callback URI in HTTP mode
-    url: process.env.SERVER_URL ?? 'https://localhost',
+    url: process.env.SERVER_URL ?? 'https://localhost:3443',
   },
 };
 

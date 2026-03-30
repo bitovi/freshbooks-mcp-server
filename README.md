@@ -72,7 +72,7 @@ This is the simplest way to use the server. Claude Desktop communicates with it 
 Start the HTTP server to complete the OAuth flow once:
 
 ```bash
-sudo npm run dev:http
+npm run dev:http
 ```
 
 In a separate terminal, print the auth URL:
@@ -81,13 +81,9 @@ In a separate terminal, print the auth URL:
 npm run auth-url
 ```
 
-Open the printed URL in your browser and log in with FreshBooks. After authenticating, the FreshBooks tokens are saved to `~/.freshbooks-mcp/sessions.json`. Copy the `refresh_token` value from that file:
+Open the printed URL in your browser and log in with FreshBooks. Your `refresh_token` and `session_token` are displayed in the browser. FreshBooks tokens are also saved to `~/.freshbooks-mcp/sessions.json`.
 
-```bash
-cat ~/.freshbooks-mcp/sessions.json
-```
-
-Add it to `.env`:
+Copy the `refresh_token` value and add it to `.env`:
 
 ```
 FRESHBOOKS_REFRESH_TOKEN=your_refresh_token
@@ -121,28 +117,26 @@ Restart Claude Desktop. The FreshBooks tools will appear in the hammer menu in t
 
 ## claude.ai Custom Connector (HTTP + SSE)
 
-Claude.ai custom connectors require a public HTTPS URL. For local testing, the server runs HTTPS directly with a self-signed certificate. For production, see [Deploying to AWS](#deploying-to-aws-ec2--nginx).
+Claude.ai custom connectors require a public HTTPS URL. You can test the connector locally with a trusted self-signed cert, use [ngrok](https://ngrok.com/) or [deploy to AWS](#deploying-to-aws-ec2--nginx).
 
 ### Testing locally
 
 **1. Start the server**
 
 ```bash
-sudo npm run dev:http
+npm run dev:http
 ```
-
-> `sudo` is required because the server binds to port 443 by default. Alternatively, add `PORT=3443` to your `.env` and use `SERVER_URL=https://localhost:3443`.
 
 **2. Trust the self-signed certificate**
 
-Open `https://localhost` in your browser. Click **Advanced → Proceed to localhost** to accept the self-signed cert. You only need to do this once per browser session — otherwise the OAuth redirect will be blocked.
+Open `https://localhost:3443` in your browser. Click **Advanced → Proceed to localhost** to accept the self-signed cert. You only need to do this once per browser session — otherwise the OAuth redirect will be blocked.
 
 **3. Add the callback URI to your FreshBooks app**
 
 In your FreshBooks developer console, add:
 
 ```
-https://localhost/oauth/callback
+https://localhost:3443/oauth/callback
 ```
 
 **4. Get the auth URL**
@@ -156,12 +150,12 @@ Open the printed URL in your browser, log in with FreshBooks, and you'll see you
 **5. Test the SSE endpoint**
 
 ```bash
-curl -sk https://localhost/sse -H "Authorization: Bearer <session_token>"
+curl -sk https://localhost:3443/sse -H "Authorization: Bearer <session_token>"
 ```
 
 ### Testing with ngrok
 
-If you'd rather avoid `sudo` or want to test with a real certificate:
+If you want to test in claude.ai locally with a real certificate:
 
 ```bash
 # Add to .env:
@@ -181,7 +175,7 @@ Add `https://your-subdomain.ngrok-free.app/oauth/callback` to your FreshBooks ap
 Go to **Settings → Integrations → Add Integration** and enter your SSE URL:
 
 ```
-https://localhost/sse              # local (with self-signed cert accepted in browser)
+https://localhost:3443/sse         # local (with self-signed cert accepted in browser)
 https://your-subdomain.ngrok-free.app/sse   # ngrok
 https://freshbooks-mcp.yourdomain.com/sse   # production
 ```
@@ -378,8 +372,8 @@ pm2 reload freshbooks-mcp
 | `FRESHBOOKS_ACCESS_TOKEN` | For stdio | A valid FreshBooks access token |
 | `FRESHBOOKS_REFRESH_TOKEN` | Optional | Refresh token — used to auto-renew the access token |
 | `MODE` | No | `stdio` (default) or `http` |
-| `PORT` | No | Listen port. Defaults to `443` when `HTTPS=true`, `3000` when `HTTPS=false` |
-| `SERVER_URL` | For HTTP mode | Public base URL. Defaults to `https://localhost` |
+| `PORT` | No | Listen port. Defaults to `3443` when `HTTPS=true`, `3000` when `HTTPS=false` |
+| `SERVER_URL` | For HTTP mode | Public base URL. Defaults to `https://localhost:3443` |
 | `HTTPS` | No | `true` (default) — self-signed cert on the Node process; `false` — plain HTTP behind a proxy |
 | `SESSIONS_FILE` | No | Path for persisted sessions (default: `~/.freshbooks-mcp/sessions.json`) |
 | `FRESHBOOKS_API_BASE` | No | Override the FreshBooks API base URL (default: `https://api.freshbooks.com`) |
