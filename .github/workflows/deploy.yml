@@ -73,11 +73,11 @@ jobs:
             sleep 10
           done
 
-          # Send deploy command via SSM — uses scripts/deploy.sh from the repo
+          # Send deploy command via SSM: pull latest code, then run deploy script
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["bash /srv/freshbooks-mcp/scripts/deploy.sh"]}' \
+            --parameters '{"commands":["cd /srv/freshbooks-mcp || exit 1", "git fetch origin deploy", "git reset --hard origin/deploy", "bash scripts/deploy.sh"]}' \
             --timeout-seconds 300 \
             --query 'Command.CommandId' \
             --output text)
