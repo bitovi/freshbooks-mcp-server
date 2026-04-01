@@ -16,10 +16,7 @@ resource "aws_instance" "app" {
     encrypted   = true
   }
 
-  user_data = templatefile("${path.module}/user_data.sh", {
-    BRANCH      = var.github_branch
-    SECRET_NAME = var.secrets_manager_name
-  })
+  user_data = file("${path.module}/user_data.sh")
 
   user_data_replace_on_change = true
 

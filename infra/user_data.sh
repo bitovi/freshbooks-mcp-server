@@ -1,12 +1,14 @@
 #!/bin/bash
+# Minimal bootloader — installs system prerequisites only.
+# Application code is pushed via S3 by the GitHub Actions pipeline.
 set -euo pipefail
 exec > /var/log/user-data.log 2>&1
 
-echo ">>> Starting FreshBooks MCP Server bootstrap..."
+echo ">>> Starting system bootstrap..."
 
 # ── System packages ──────────────────────────────────────────────────────────
 dnf update -y
-dnf install -y git jq
+dnf install -y jq
 
 # ── Node.js 22 ───────────────────────────────────────────────────────────────
 curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
@@ -53,35 +55,11 @@ CWCONFIG
   -a fetch-config -m ec2 \
   -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
 
-# ── Clone & build the app ────────────────────────────────────────────────────
-APP_DIR="/srv/freshbooks-mcp"
-
-git clone --branch "${BRANCH}" --single-branch https://github.com/bitovi/freshbooks-mcp-server.git "$$APP_DIR"
-cd "$$APP_DIR"
-npm ci
-npm run build
-mkdir -p logs
-
-# ── Pull secrets from Secrets Manager → .env ─────────────────────────────────
-REGION=$$(ec2-metadata --availability-zone | awk '{print $$2}' | sed 's/[a-z]$$//')
-
-aws secretsmanager get-secret-value \
-  --secret-id "${SECRET_NAME}" \
-  --region "$$REGION" \
-  --query 'SecretString' \
-  --output text | jq -r 'to_entries[] | "\(.key)=\(.value)"' > "$$APP_DIR/.env"
-
-chmod 600 "$$APP_DIR/.env"
-echo ">>> .env written"
-
-# ── Session storage directory ────────────────────────────────────────────────
+# ── Prepare app directory ────────────────────────────────────────────────────
+mkdir -p /srv/freshbooks-mcp/logs
 mkdir -p /home/ec2-user/.freshbooks-mcp
 chown ec2-user:ec2-user /home/ec2-user/.freshbooks-mcp
 
-# ── Start with PM2 ──────────────────────────────────────────────────────────
-cd "$$APP_DIR"
-pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup systemd -u root --hp /root | tail -1 | bash
-
-echo ">>> FreshBooks MCP Server bootstrap complete!"
+# ── Signal ready ─────────────────────────────────────────────────────────────
+touch /var/lib/bootstrap-complete
+echo ">>> System bootstrap complete — ready for application deployment"
