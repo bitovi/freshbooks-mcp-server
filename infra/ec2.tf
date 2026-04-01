@@ -21,7 +21,7 @@ resource "aws_instance" "app" {
     SECRET_NAME = var.secrets_manager_name
   })
 
-  user_data_replace_on_change = false
+  user_data_replace_on_change = true
 
   tags = {
     Name = "freshbooks-mcp-server"
