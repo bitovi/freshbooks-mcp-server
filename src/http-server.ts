@@ -140,6 +140,17 @@ export function createHttpServer() {
     next();
   });
 
+  // ── Request logging ──────────────────────────────────────────────────────
+
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - start;
+      console.log(`${new Date().toISOString()} ${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+    });
+    next();
+  });
+
   // ── Health ────────────────────────────────────────────────────────────────
 
   app.get('/health', (_req, res) => {
@@ -196,8 +207,10 @@ export function createHttpServer() {
 
   app.get('/oauth/authorize', (req, res) => {
     const { redirect_uri, state, client_id } = req.query as Record<string, string>;
+    console.log(`[OAuth] /authorize called — client_id=${client_id}, redirect_uri=${redirect_uri}, state=${state?.slice(0, 20)}...`);
 
     if (!redirect_uri) {
+      console.log('[OAuth] /authorize rejected: missing redirect_uri');
       res.status(400).send('Missing redirect_uri');
       return;
     }
@@ -206,10 +219,13 @@ export function createHttpServer() {
     const oauthState = JSON.stringify({ redirect_uri, state, client_id });
     const encodedState = Buffer.from(oauthState).toString('base64url');
 
+    const callbackUri = getOAuthCallbackUri();
+    console.log(`[OAuth] Redirecting to FreshBooks — callback_uri=${callbackUri}`);
+
     const fbParams = new URLSearchParams({
       client_id: config.freshbooks.clientId,
       response_type: 'code',
-      redirect_uri: getOAuthCallbackUri(),
+      redirect_uri: callbackUri,
       state: encodedState,
     });
 
@@ -221,13 +237,16 @@ export function createHttpServer() {
 
   app.get('/oauth/callback', async (req, res) => {
     const { code, state, error } = req.query as Record<string, string>;
+    console.log(`[OAuth] /callback called — code=${code ? 'present' : 'MISSING'}, state=${state ? 'present' : 'MISSING'}, error=${error || 'none'}`);
 
     if (error) {
+      console.error(`[OAuth] FreshBooks returned error: ${error}`);
       res.status(400).send(`FreshBooks OAuth error: ${error}`);
       return;
     }
 
     if (!code || !state) {
+      console.error('[OAuth] Missing code or state in callback');
       res.status(400).send('Missing code or state');
       return;
     }
@@ -240,7 +259,9 @@ export function createHttpServer() {
     if (!isLocalTest) {
       try {
         decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+        console.log(`[OAuth] Decoded state — redirect_uri=${decoded?.redirect_uri}, client_id=${decoded?.client_id}`);
       } catch {
+        console.error('[OAuth] Failed to decode state parameter');
         res.status(400).send('Invalid state parameter');
         return;
       }
@@ -249,20 +270,23 @@ export function createHttpServer() {
     // Exchange the FreshBooks code for tokens
     let tokens: StoredTokens;
     try {
+      const callbackUri = getOAuthCallbackUri();
+      console.log(`[OAuth] Exchanging code for tokens — redirect_uri=${callbackUri}`);
       const { data } = await axios.post(config.freshbooks.tokenUrl, {
         grant_type: 'authorization_code',
         code,
         client_id: config.freshbooks.clientId,
         client_secret: config.freshbooks.clientSecret,
-        redirect_uri: getOAuthCallbackUri(),
+        redirect_uri: callbackUri,
       });
+      console.log(`[OAuth] Token exchange succeeded — expires_in=${data.expires_in}`);
       tokens = {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
         expires_at: Date.now() + data.expires_in * 1000,
       };
-    } catch (err) {
-      console.error('FreshBooks token exchange failed:', err);
+    } catch (err: any) {
+      console.error('[OAuth] FreshBooks token exchange failed:', err?.response?.status, err?.response?.data || err?.message);
       res.status(500).send('Failed to exchange authorization code with FreshBooks');
       return;
     }
@@ -346,6 +370,7 @@ export function createHttpServer() {
   // claude.ai exchanges our auth code for a session token
 
   app.post('/oauth/token', (req, res) => {
+    console.log(`[OAuth] /token called — grant_type=${req.body?.grant_type}, code=${req.body?.code ? 'present' : 'absent'}`);
     const { grant_type, code, refresh_token: incomingRefreshToken } = req.body as Record<string, string>;
 
     if (grant_type === 'authorization_code') {
