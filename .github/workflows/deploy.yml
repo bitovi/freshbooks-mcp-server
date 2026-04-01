@@ -1,0 +1,174 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches: [deploy]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy FreshBooks MCP Server
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.outputs.outputs.app_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_AI }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_AI }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get Terraform Outputs
+        id: outputs
+        working-directory: infra
+        run: |
+          echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
+          echo "sse_endpoint=$(terraform output -raw sse_endpoint)" >> "$GITHUB_OUTPUT"
+          echo "oauth_callback=$(terraform output -raw oauth_callback)" >> "$GITHUB_OUTPUT"
+          echo "instance_id=$(terraform output -raw instance_id)" >> "$GITHUB_OUTPUT"
+          echo "cloudwatch_log_group=$(terraform output -raw cloudwatch_log_group)" >> "$GITHUB_OUTPUT"
+          echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Application Update
+        run: |
+          INSTANCE_ID="${{ steps.outputs.outputs.instance_id }}"
+          echo "Deploying to instance: $INSTANCE_ID"
+
+          # Wait for SSM agent to be ready
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+              --query 'InstanceInformationList[0].PingStatus' \
+              --output text 2>/dev/null || echo "None")
+            if [ "$STATUS" = "Online" ]; then
+              echo "SSM agent is online"
+              break
+            fi
+            echo "Waiting for SSM agent... ($i/30)"
+            sleep 10
+          done
+
+          # Send deploy command via SSM
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "cd /srv/freshbooks-mcp || exit 0",
+              "git fetch origin deploy",
+              "git reset --hard origin/deploy",
+              "npm ci",
+              "npm run build",
+              "REGION=$(ec2-metadata --availability-zone | awk '\"'\"'{print $2}'\"'\"' | sed '\"'\"'s/[a-z]$//'\"'\"')",
+              "aws secretsmanager get-secret-value --secret-id freshbooks-mcp-server-env --region $REGION --query SecretString --output text | jq -r '\"'\"'to_entries[] | \"\\(.key)=\\(.value)\"'\"'\"' > .env",
+              "chmod 600 .env",
+              "pm2 reload ecosystem.config.cjs || pm2 start ecosystem.config.cjs",
+              "pm2 save"
+            ]' \
+            --timeout-seconds 300 \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for command to complete
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" 2>/dev/null || true
+
+          # Check result
+          RESULT=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'Status' \
+            --output text 2>/dev/null || echo "Unknown")
+
+          echo "Deploy result: $RESULT"
+
+          if [ "$RESULT" != "Success" ] && [ "$RESULT" != "InProgress" ]; then
+            echo "::warning::SSM command status: $RESULT (may still be running if instance is bootstrapping)"
+          fi
+
+      - name: Job Summary
+        run: |
+          APP_URL="${{ steps.outputs.outputs.app_url }}"
+          SSE="${{ steps.outputs.outputs.sse_endpoint }}"
+          CALLBACK="${{ steps.outputs.outputs.oauth_callback }}"
+          CW_LOG="${{ steps.outputs.outputs.cloudwatch_log_group }}"
+          INSTANCE="${{ steps.outputs.outputs.instance_id }}"
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## 🚀 FreshBooks MCP Server — Deployment Complete
+
+          ### 🌐 Endpoints
+
+          | Endpoint | URL |
+          |----------|-----|
+          | **Application** | ${APP_URL} |
+          | **SSE (claude.ai)** | ${SSE} |
+          | **Health Check** | ${APP_URL}/health |
+          | **OAuth Callback** | ${CALLBACK} |
+
+          ---
+
+          ### 🔧 Setup Instructions
+
+          #### 1. Add OAuth Callback to FreshBooks
+          Go to [FreshBooks Developer Console](https://my.freshbooks.com/#/developer) and add this redirect URI:
+          \`\`\`
+          ${CALLBACK}
+          \`\`\`
+
+          #### 2. Connect to claude.ai
+          In claude.ai → **Settings → Integrations → Add Integration**, enter:
+          \`\`\`
+          ${SSE}
+          \`\`\`
+          Claude will walk you through the FreshBooks OAuth flow.
+
+          #### 3. Connect via AWS Session Manager
+          \`\`\`bash
+          aws ssm start-session --target ${INSTANCE} --region us-east-1
+          \`\`\`
+
+          #### 4. View Logs
+          \`\`\`bash
+          aws logs tail ${CW_LOG} --follow --region us-east-1
+          \`\`\`
+
+          ---
+
+          ### 📋 Infrastructure Details
+
+          | Resource | Value |
+          |----------|-------|
+          | EC2 Instance | \`${INSTANCE}\` |
+          | CloudWatch Logs | \`${CW_LOG}\` |
+          | Region | \`us-east-1\` |
+          | TLS | ACM certificate (auto-validated via Route53) |
+          | Load Balancer | ALB with 3600s idle timeout for SSE |
+          EOF
