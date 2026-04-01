@@ -26,6 +26,8 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
 import selfsigned from 'selfsigned';
@@ -49,8 +51,9 @@ interface OAuthClient {
 }
 const registeredClients = new Map<string, OAuthClient>();
 
-// ── Active SSE transports ────────────────────────────────────────────────────
+// ── Active transports ────────────────────────────────────────────────────
 const sseTransports = new Map<string, SSEServerTransport>();
+const streamableTransports = new Map<string, StreamableHTTPServerTransport>();
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
@@ -440,25 +443,96 @@ export function createHttpServer() {
     res.status(400).json({ error: 'unsupported_grant_type' });
   });
 
-  // ── MCP SSE endpoint ──────────────────────────────────────────────────────
+  // ── MCP Streamable HTTP endpoint (POST /sse) ─────────────────────────────
+  // Claude.ai uses the newer Streamable HTTP transport, sending POST to the
+  // same /sse URL. We detect this and handle both protocols on the same path.
 
+  app.post('/sse', requireAuth, async (req: Request, res: Response) => {
+    const freshbooksToken = (req as Request & { freshbooksToken: string }).freshbooksToken;
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    console.log(`[MCP] POST /sse — sessionId=${sessionId || 'none'}, isInit=${isInitializeRequest(req.body)}`);
+
+    if (sessionId && streamableTransports.has(sessionId)) {
+      // Reuse existing session
+      const transport = streamableTransports.get(sessionId)!;
+      await transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    if (!sessionId && isInitializeRequest(req.body)) {
+      // New session
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sid) => {
+          console.log(`[MCP] Streamable HTTP session initialized: ${sid}`);
+          streamableTransports.set(sid, transport);
+        },
+      });
+
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid) {
+          console.log(`[MCP] Streamable HTTP session closed: ${sid}`);
+          streamableTransports.delete(sid);
+        }
+      };
+
+      const fbClient = new FreshBooksClient(freshbooksToken);
+      const mcpServer = createMcpServer(() => fbClient);
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    res.status(400).json({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+      id: null,
+    });
+  });
+
+  // Handle GET /sse for Streamable HTTP SSE stream (new protocol)
   app.get('/sse', requireAuth, async (req: Request, res: Response) => {
-    const sessionId = randomUUID();
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+    // If this is a Streamable HTTP session, handle it
+    if (sessionId && streamableTransports.has(sessionId)) {
+      console.log(`[MCP] GET /sse — Streamable HTTP SSE stream for session ${sessionId}`);
+      const transport = streamableTransports.get(sessionId)!;
+      await transport.handleRequest(req, res);
+      return;
+    }
+
+    // Otherwise, legacy SSE transport
+    console.log('[MCP] GET /sse — Legacy SSE transport');
+    const legacySessionId = randomUUID();
     const freshbooksToken = (req as Request & { freshbooksToken: string }).freshbooksToken;
     const fbClient = new FreshBooksClient(freshbooksToken);
 
-    const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
-    sseTransports.set(sessionId, transport);
+    const transport = new SSEServerTransport(`/messages?sessionId=${legacySessionId}`, res);
+    sseTransports.set(legacySessionId, transport);
 
     const mcpServer = createMcpServer(() => fbClient);
     await mcpServer.connect(transport);
 
     req.on('close', () => {
-      sseTransports.delete(sessionId);
+      sseTransports.delete(legacySessionId);
     });
   });
 
-  // ── MCP message endpoint ──────────────────────────────────────────────────
+  // Handle DELETE /sse for Streamable HTTP session termination
+  app.delete('/sse', async (req: Request, res: Response) => {
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    if (sessionId && streamableTransports.has(sessionId)) {
+      console.log(`[MCP] DELETE /sse — closing session ${sessionId}`);
+      const transport = streamableTransports.get(sessionId)!;
+      await transport.handleRequest(req, res);
+      return;
+    }
+    res.status(404).json({ error: 'Session not found' });
+  });
+
+  // ── Legacy MCP message endpoint ──────────────────────────────────────────
 
   app.post('/messages', requireAuth, async (req: Request, res: Response) => {
     const sessionId = req.query['sessionId'] as string;
