@@ -454,7 +454,7 @@ export class FreshBooksClient {
       started_to: opts.started_to,
       billed: opts.billed !== undefined ? String(opts.billed) : undefined,
       billable: opts.billable !== undefined ? String(opts.billable) : undefined,
-      include_team: opts.include_team ? 'true' : undefined,
+      team: opts.include_team ? 'true' : undefined,
     });
     const { data } = await this.http.get(
       `/timetracking/business/${this.businessId}/time_entries`,
