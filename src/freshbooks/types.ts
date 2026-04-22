@@ -239,6 +239,16 @@ export interface ItemListResponse {
   pages: number;
 }
 
+// ── Team Members ──────────────────────────────────────────────────────────────
+
+export interface TeamMember {
+  identity_id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  role: string;
+}
+
 // ── Stored token (for stdio mode) ─────────────────────────────────────────────
 
 export interface StoredTokens {

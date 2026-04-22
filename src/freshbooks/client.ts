@@ -16,6 +16,7 @@ import type {
   FreshBooksTimeEntry,
   ItemListResponse,
   FreshBooksItem,
+  TeamMember,
 } from './types.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -440,6 +441,7 @@ export class FreshBooksClient {
     started_to?: string;
     billed?: boolean;
     billable?: boolean;
+    include_team?: boolean;
   } = {}): Promise<TimeEntryListResponse> {
     await this.ensureIdentity();
     const params = buildParams({
@@ -452,12 +454,21 @@ export class FreshBooksClient {
       started_to: opts.started_to,
       billed: opts.billed !== undefined ? String(opts.billed) : undefined,
       billable: opts.billable !== undefined ? String(opts.billable) : undefined,
+      include_team: opts.include_team ? 'true' : undefined,
     });
     const { data } = await this.http.get(
       `/timetracking/business/${this.businessId}/time_entries`,
       { params }
     );
     return data;
+  }
+
+  async listTeamMembers(): Promise<TeamMember[]> {
+    await this.ensureIdentity();
+    const { data } = await this.http.get('/auth/api/v1/users/members', {
+      params: { business_id: this.businessId },
+    });
+    return data.response;
   }
 
   async getTimeEntry(timeEntryId: number): Promise<FreshBooksTimeEntry> {
