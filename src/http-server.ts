@@ -26,6 +26,8 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
 import selfsigned from 'selfsigned';
@@ -49,8 +51,9 @@ interface OAuthClient {
 }
 const registeredClients = new Map<string, OAuthClient>();
 
-// ── Active SSE transports ────────────────────────────────────────────────────
+// ── Active transports ────────────────────────────────────────────────────
 const sseTransports = new Map<string, SSEServerTransport>();
+const streamableTransports = new Map<string, StreamableHTTPServerTransport>();
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
@@ -140,6 +143,17 @@ export function createHttpServer() {
     next();
   });
 
+  // ── Request logging ──────────────────────────────────────────────────────
+
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - start;
+      console.log(`${new Date().toISOString()} ${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+    });
+    next();
+  });
+
   // ── Health ────────────────────────────────────────────────────────────────
 
   app.get('/health', (_req, res) => {
@@ -196,8 +210,10 @@ export function createHttpServer() {
 
   app.get('/oauth/authorize', (req, res) => {
     const { redirect_uri, state, client_id } = req.query as Record<string, string>;
+    console.log(`[OAuth] /authorize called — client_id=${client_id}, redirect_uri=${redirect_uri}, state=${state?.slice(0, 20)}...`);
 
     if (!redirect_uri) {
+      console.log('[OAuth] /authorize rejected: missing redirect_uri');
       res.status(400).send('Missing redirect_uri');
       return;
     }
@@ -206,10 +222,13 @@ export function createHttpServer() {
     const oauthState = JSON.stringify({ redirect_uri, state, client_id });
     const encodedState = Buffer.from(oauthState).toString('base64url');
 
+    const callbackUri = getOAuthCallbackUri();
+    console.log(`[OAuth] Redirecting to FreshBooks — callback_uri=${callbackUri}`);
+
     const fbParams = new URLSearchParams({
       client_id: config.freshbooks.clientId,
       response_type: 'code',
-      redirect_uri: getOAuthCallbackUri(),
+      redirect_uri: callbackUri,
       state: encodedState,
     });
 
@@ -221,13 +240,16 @@ export function createHttpServer() {
 
   app.get('/oauth/callback', async (req, res) => {
     const { code, state, error } = req.query as Record<string, string>;
+    console.log(`[OAuth] /callback called — code=${code ? 'present' : 'MISSING'}, state=${state ? 'present' : 'MISSING'}, error=${error || 'none'}`);
 
     if (error) {
+      console.error(`[OAuth] FreshBooks returned error: ${error}`);
       res.status(400).send(`FreshBooks OAuth error: ${error}`);
       return;
     }
 
     if (!code || !state) {
+      console.error('[OAuth] Missing code or state in callback');
       res.status(400).send('Missing code or state');
       return;
     }
@@ -240,7 +262,9 @@ export function createHttpServer() {
     if (!isLocalTest) {
       try {
         decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+        console.log(`[OAuth] Decoded state — redirect_uri=${decoded?.redirect_uri}, client_id=${decoded?.client_id}`);
       } catch {
+        console.error('[OAuth] Failed to decode state parameter');
         res.status(400).send('Invalid state parameter');
         return;
       }
@@ -249,20 +273,23 @@ export function createHttpServer() {
     // Exchange the FreshBooks code for tokens
     let tokens: StoredTokens;
     try {
+      const callbackUri = getOAuthCallbackUri();
+      console.log(`[OAuth] Exchanging code for tokens — redirect_uri=${callbackUri}`);
       const { data } = await axios.post(config.freshbooks.tokenUrl, {
         grant_type: 'authorization_code',
         code,
         client_id: config.freshbooks.clientId,
         client_secret: config.freshbooks.clientSecret,
-        redirect_uri: getOAuthCallbackUri(),
+        redirect_uri: callbackUri,
       });
+      console.log(`[OAuth] Token exchange succeeded — expires_in=${data.expires_in}`);
       tokens = {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
         expires_at: Date.now() + data.expires_in * 1000,
       };
-    } catch (err) {
-      console.error('FreshBooks token exchange failed:', err);
+    } catch (err: any) {
+      console.error('[OAuth] FreshBooks token exchange failed:', err?.response?.status, err?.response?.data || err?.message);
       res.status(500).send('Failed to exchange authorization code with FreshBooks');
       return;
     }
@@ -346,6 +373,7 @@ export function createHttpServer() {
   // claude.ai exchanges our auth code for a session token
 
   app.post('/oauth/token', (req, res) => {
+    console.log(`[OAuth] /token called — grant_type=${req.body?.grant_type}, code=${req.body?.code ? 'present' : 'absent'}`);
     const { grant_type, code, refresh_token: incomingRefreshToken } = req.body as Record<string, string>;
 
     if (grant_type === 'authorization_code') {
@@ -415,25 +443,96 @@ export function createHttpServer() {
     res.status(400).json({ error: 'unsupported_grant_type' });
   });
 
-  // ── MCP SSE endpoint ──────────────────────────────────────────────────────
+  // ── MCP Streamable HTTP endpoint (POST /sse) ─────────────────────────────
+  // Claude.ai uses the newer Streamable HTTP transport, sending POST to the
+  // same /sse URL. We detect this and handle both protocols on the same path.
 
+  app.post('/sse', requireAuth, async (req: Request, res: Response) => {
+    const freshbooksToken = (req as Request & { freshbooksToken: string }).freshbooksToken;
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    console.log(`[MCP] POST /sse — sessionId=${sessionId || 'none'}, isInit=${isInitializeRequest(req.body)}`);
+
+    if (sessionId && streamableTransports.has(sessionId)) {
+      // Reuse existing session
+      const transport = streamableTransports.get(sessionId)!;
+      await transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    if (!sessionId && isInitializeRequest(req.body)) {
+      // New session
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sid) => {
+          console.log(`[MCP] Streamable HTTP session initialized: ${sid}`);
+          streamableTransports.set(sid, transport);
+        },
+      });
+
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid) {
+          console.log(`[MCP] Streamable HTTP session closed: ${sid}`);
+          streamableTransports.delete(sid);
+        }
+      };
+
+      const fbClient = new FreshBooksClient(freshbooksToken);
+      const mcpServer = createMcpServer(() => fbClient);
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    res.status(400).json({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+      id: null,
+    });
+  });
+
+  // Handle GET /sse for Streamable HTTP SSE stream (new protocol)
   app.get('/sse', requireAuth, async (req: Request, res: Response) => {
-    const sessionId = randomUUID();
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+    // If this is a Streamable HTTP session, handle it
+    if (sessionId && streamableTransports.has(sessionId)) {
+      console.log(`[MCP] GET /sse — Streamable HTTP SSE stream for session ${sessionId}`);
+      const transport = streamableTransports.get(sessionId)!;
+      await transport.handleRequest(req, res);
+      return;
+    }
+
+    // Otherwise, legacy SSE transport
+    console.log('[MCP] GET /sse — Legacy SSE transport');
+    const legacySessionId = randomUUID();
     const freshbooksToken = (req as Request & { freshbooksToken: string }).freshbooksToken;
     const fbClient = new FreshBooksClient(freshbooksToken);
 
-    const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
-    sseTransports.set(sessionId, transport);
+    const transport = new SSEServerTransport(`/messages?sessionId=${legacySessionId}`, res);
+    sseTransports.set(legacySessionId, transport);
 
     const mcpServer = createMcpServer(() => fbClient);
     await mcpServer.connect(transport);
 
     req.on('close', () => {
-      sseTransports.delete(sessionId);
+      sseTransports.delete(legacySessionId);
     });
   });
 
-  // ── MCP message endpoint ──────────────────────────────────────────────────
+  // Handle DELETE /sse for Streamable HTTP session termination
+  app.delete('/sse', async (req: Request, res: Response) => {
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    if (sessionId && streamableTransports.has(sessionId)) {
+      console.log(`[MCP] DELETE /sse — closing session ${sessionId}`);
+      const transport = streamableTransports.get(sessionId)!;
+      await transport.handleRequest(req, res);
+      return;
+    }
+    res.status(404).json({ error: 'Session not found' });
+  });
+
+  // ── Legacy MCP message endpoint ──────────────────────────────────────────
 
   app.post('/messages', requireAuth, async (req: Request, res: Response) => {
     const sessionId = req.query['sessionId'] as string;

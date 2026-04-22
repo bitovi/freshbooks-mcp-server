@@ -2,3 +2,10 @@ node_modules/
 dist/
 .env
 *.js.map
+logs/
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate*
+infra/*.tfplan
+infra/.terraform.lock.hcl
