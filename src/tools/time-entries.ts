@@ -16,6 +16,7 @@ export function registerTimeEntryTools(server: McpServer, getClient: () => Fresh
       started_to: z.string().optional().describe('Filter entries starting on or before this ISO 8601 datetime'),
       billed: z.boolean().optional().describe('Filter by billed status'),
       billable: z.boolean().optional().describe('Filter by billable status'),
+      include_team: z.boolean().optional().describe('If true, returns time entries for all team members (requires owner/admin role). Default: false.'),
     },
     async (opts) => {
       const result = await getClient().listTimeEntries(opts);

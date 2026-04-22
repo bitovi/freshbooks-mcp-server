@@ -3,6 +3,18 @@ import { FreshBooksClient } from '../freshbooks/client.js';
 
 export function registerUserTools(server: McpServer, getClient: () => FreshBooksClient) {
   server.tool(
+    'list_team_members',
+    'List all team members in the FreshBooks business account, including their identity_id, name, and email.',
+    {},
+    async () => {
+      const members = await getClient().listTeamMembers();
+      return {
+        content: [{ type: 'text', text: JSON.stringify(members, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
     'get_current_user',
     'Get the authenticated FreshBooks user profile, including their account ID and business ID required for other API calls.',
     {},
