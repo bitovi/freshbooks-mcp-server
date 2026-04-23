@@ -17,6 +17,10 @@ import type {
   ItemListResponse,
   FreshBooksItem,
   TeamMember,
+  ServiceListResponse,
+  FreshBooksService,
+  FreshBooksServiceRate,
+  FreshBooksProjectServiceRate,
 } from './types.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -553,5 +557,47 @@ export class FreshBooksClient {
       `/accounting/account/${this.accountId}/items/items/${itemId}`
     );
     return data.response.result.item;
+  }
+
+  // ── Services ─────────────────────────────────────────────────────────────────
+
+  async listServices(opts: {
+    page?: number;
+    per_page?: number;
+  } = {}): Promise<ServiceListResponse> {
+    await this.ensureIdentity();
+    const params = buildParams({
+      page: opts.page ?? 1,
+      per_page: opts.per_page ?? 25,
+    });
+    const { data } = await this.http.get(
+      `/comments/business/${this.businessId}/services`,
+      { params }
+    );
+    return data;
+  }
+
+  async getService(serviceId: number): Promise<FreshBooksService> {
+    await this.ensureIdentity();
+    const { data } = await this.http.get(
+      `/comments/business/${this.businessId}/service/${serviceId}`
+    );
+    return data.service;
+  }
+
+  async getServiceRate(serviceId: number): Promise<FreshBooksServiceRate> {
+    await this.ensureIdentity();
+    const { data } = await this.http.get(
+      `/comments/business/${this.businessId}/service/${serviceId}/rate`
+    );
+    return data.service_rate;
+  }
+
+  async listProjectServiceRates(projectId: number): Promise<FreshBooksProjectServiceRate[]> {
+    await this.ensureIdentity();
+    const { data } = await this.http.get(
+      `/comments/business/${this.businessId}/project/${projectId}/service_rates`
+    );
+    return data.project_service_rates;
   }
 }

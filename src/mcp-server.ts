@@ -8,6 +8,7 @@ import { registerPaymentTools } from './tools/payments.js';
 import { registerProjectTools } from './tools/projects.js';
 import { registerTimeEntryTools } from './tools/time-entries.js';
 import { registerItemTools } from './tools/items.js';
+import { registerServiceTools } from './tools/services.js';
 
 /**
  * Create and configure a FreshBooks MCP server.
@@ -30,6 +31,7 @@ export function createMcpServer(getClient: () => FreshBooksClient): McpServer {
   registerProjectTools(server, getClient);
   registerTimeEntryTools(server, getClient);
   registerItemTools(server, getClient);
+  registerServiceTools(server, getClient);
 
   return server;
 }
