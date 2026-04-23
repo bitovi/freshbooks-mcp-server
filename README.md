@@ -11,6 +11,8 @@ Supports two modes:
 | Tool | Description |
 |---|---|
 | `get_current_user` | Get the authenticated user's profile and account/business IDs |
+| `list_team_members` | List all team members in the business with their identity_id, name, email, and role |
+| `get_team_member` | Get a team member by their identity_id |
 | `list_clients` | List clients with optional search and filters |
 | `get_client` | Get a client by ID |
 | `list_invoices` | List invoices filtered by client, status, or date range |
@@ -380,7 +382,7 @@ src/
     client.ts           FreshBooks API client
     types.ts            TypeScript types for API responses
   tools/
-    users.ts            get_current_user
+    users.ts            get_current_user, list_team_members, get_team_member
     clients.ts          Client tools
     invoices.ts         Invoice tools
     expenses.ts         Expense tools

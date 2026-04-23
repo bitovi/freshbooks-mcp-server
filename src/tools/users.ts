@@ -1,7 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 import { FreshBooksClient } from '../freshbooks/client.js';
 
 export function registerUserTools(server: McpServer, getClient: () => FreshBooksClient) {
+  server.tool(
+    'get_team_member',
+    'Get a single team member by their identity_id.',
+    { identity_id: z.number().describe('The identity_id of the team member') },
+    async ({ identity_id }) => {
+      const member = await getClient().getTeamMember(identity_id);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(member, null, 2) }],
+      };
+    }
+  );
+
   server.tool(
     'list_team_members',
     'List all team members in the FreshBooks business account, including their identity_id, name, and email.',
