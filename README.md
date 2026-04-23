@@ -1,6 +1,6 @@
 # FreshBooks MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for the [FreshBooks API](https://www.freshbooks.com/api). Connect Claude to your FreshBooks account to read invoices, clients, expenses, projects, and more, and to manage payments and time entries.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for the [FreshBooks API](https://www.freshbooks.com/api). Connect Claude to your FreshBooks account to read invoices, clients, expenses, projects, services, and more, and to manage payments and time entries.
 
 Supports two modes:
 - **stdio** — for Claude Desktop and MCP Inspector (no server needed)
@@ -30,6 +30,10 @@ Supports two modes:
 | `delete_time_entry` | Delete a time entry |
 | `list_items` | List items (products/services) |
 | `get_item` | Get an item by ID |
+| `list_services` | List all services defined for the business |
+| `get_service` | Get a service by ID |
+| `get_service_rate` | Get the global billing rate for a service |
+| `list_project_service_rates` | List per-project billing rate overrides for all services on a project (undocumented endpoint) |
 
 ## Prerequisites
 
@@ -390,6 +394,7 @@ src/
     projects.ts         Project tools
     time-entries.ts     Time entry tools
     items.ts            Item tools
+    services.ts         Service tools
   scripts/
     auth-url.ts         Prints the FreshBooks OAuth URL for local testing
 ```

@@ -257,6 +257,39 @@ export interface TeamMember {
   updated_at: string;
 }
 
+// ── Services ──────────────────────────────────────────────────────────────────
+
+export interface FreshBooksService {
+  id: number;
+  business_id: number;
+  name: string;
+  billable: boolean;
+  vis_state: number; // 0 = active, 1 = deleted
+}
+
+export interface ServiceListResponse {
+  services: FreshBooksService[];
+  meta: {
+    total: number;
+    per_page: number;
+    page: number;
+    pages: number;
+  };
+}
+
+export interface FreshBooksServiceRate {
+  service_id: number;
+  business_id: number;
+  rate: string;
+}
+
+export interface FreshBooksProjectServiceRate {
+  service_id: number;
+  business_id: number;
+  project_id: number;
+  rate: string;
+}
+
 // ── Stored token (for stdio mode) ─────────────────────────────────────────────
 
 export interface StoredTokens {
