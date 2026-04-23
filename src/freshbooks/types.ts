@@ -243,10 +243,18 @@ export interface ItemListResponse {
 
 export interface TeamMember {
   identity_id: number;
+  uuid: string;
   first_name: string;
+  middle_name: string | null;
   last_name: string;
   email: string;
-  role: string;
+  job_title: string | null;
+  business_role_name: string;
+  active: boolean;
+  invited: boolean;
+  invitation_date_accepted: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Stored token (for stdio mode) ─────────────────────────────────────────────

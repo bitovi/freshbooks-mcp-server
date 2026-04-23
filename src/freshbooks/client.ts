@@ -465,10 +465,17 @@ export class FreshBooksClient {
 
   async listTeamMembers(): Promise<TeamMember[]> {
     await this.ensureIdentity();
-    const { data } = await this.http.get('/auth/api/v1/users/members', {
-      params: { business_id: this.businessId },
-    });
+    const { data } = await this.http.get(
+      `/auth/api/v1/businesses/${this.businessId}/team_members`
+    );
     return data.response;
+  }
+
+  async getTeamMember(identityId: number): Promise<TeamMember> {
+    const members = await this.listTeamMembers();
+    const member = members.find((m) => m.identity_id === identityId);
+    if (!member) throw new Error(`Team member with identity_id ${identityId} not found.`);
+    return member;
   }
 
   async getTimeEntry(timeEntryId: number): Promise<FreshBooksTimeEntry> {
