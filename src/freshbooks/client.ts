@@ -495,7 +495,9 @@ export class FreshBooksClient {
     duration: number;
     started_at: string;
     note?: string;
+    service_id?: number;
     task_id?: number;
+    client_id?: number;
     is_logged?: boolean;
     billable?: boolean;
   }): Promise<FreshBooksTimeEntry> {
