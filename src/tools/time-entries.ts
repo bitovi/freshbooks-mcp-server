@@ -48,19 +48,24 @@ export function registerTimeEntryTools(server: McpServer, getClient: () => Fresh
       duration: z.number().int().positive().describe('Duration in seconds (e.g. 3600 for 1 hour)'),
       started_at: z.string().describe('Start time as an ISO 8601 datetime string (e.g. "2024-01-15T09:00:00Z")'),
       note: z.string().optional().describe('Description of work done'),
+      service_id: z.number().int().positive().optional().describe('Service ID to associate with this time entry'),
       task_id: z.number().int().positive().optional().describe('Task ID within the project'),
       billable: z.boolean().optional().describe('Whether this time is billable (default: true)'),
       is_logged: z.boolean().optional().describe('Whether the time entry is logged (as opposed to a timer still running)'),
     },
-    async ({ project_id, duration, started_at, note, task_id, billable, is_logged }) => {
-      const entry = await getClient().createTimeEntry({
+    async ({ project_id, duration, started_at, note, service_id, task_id, billable, is_logged }) => {
+      const client = getClient();
+      const project = await client.getProject(project_id);
+      const entry = await client.createTimeEntry({
         project_id,
         duration,
         started_at,
         note,
+        service_id,
         task_id,
         billable,
         is_logged: is_logged ?? true,
+        client_id: project.client_id ?? undefined,
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(entry, null, 2) }],

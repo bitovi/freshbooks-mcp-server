@@ -25,7 +25,7 @@ Supports two modes:
 | `get_project` | Get a project by ID |
 | `list_time_entries` | List time entries filtered by project, client, or date range |
 | `get_time_entry` | Get a time entry by ID |
-| `create_time_entry` | Log a time entry against a project |
+| `create_time_entry` | Log a time entry against a project; automatically associates the project's client and accepts an optional `service_id` |
 | `update_time_entry` | Update a time entry |
 | `delete_time_entry` | Delete a time entry |
 | `list_items` | List items (products/services) |
