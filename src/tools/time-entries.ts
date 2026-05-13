@@ -79,10 +79,12 @@ export function registerTimeEntryTools(server: McpServer, getClient: () => Fresh
     {
       time_entry_id: z.number().int().positive().describe('The time entry ID to update'),
       duration: z.number().int().positive().optional().describe('New duration in seconds'),
-      started_at: z.string().optional().describe('New start time (ISO 8601)'),
-      note: z.string().optional().describe('Updated note'),
-      task_id: z.number().int().positive().optional(),
-      billable: z.boolean().optional(),
+      started_at: z.string().optional().describe('New start time as an ISO 8601 datetime string'),
+      note: z.string().optional().describe('Updated note / work description'),
+      service_id: z.number().int().positive().optional().describe('Updated service ID to associate with this entry'),
+      task_id: z.number().int().positive().optional().describe('Updated task ID within the project'),
+      billable: z.boolean().optional().describe('Whether this time is billable'),
+      is_logged: z.boolean().optional().describe('Whether the time entry is fully logged (as opposed to a running timer)'),
     },
     async ({ time_entry_id, ...body }) => {
       const entry = await getClient().updateTimeEntry(time_entry_id, body);

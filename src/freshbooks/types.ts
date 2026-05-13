@@ -197,6 +197,7 @@ export interface FreshBooksTimeEntry {
   identity_id: number;
   project_id: number;
   task_id: number | null;
+  service_id: number | null;
   client_id: number | null;
   is_logged: boolean;
   duration: number; // seconds

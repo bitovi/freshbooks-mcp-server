@@ -514,14 +514,27 @@ export class FreshBooksClient {
     duration?: number;
     started_at?: string;
     note?: string;
+    service_id?: number;
     task_id?: number;
     is_logged?: boolean;
     billable?: boolean;
   }): Promise<FreshBooksTimeEntry> {
     await this.ensureIdentity();
+    const existing = await this.getTimeEntry(timeEntryId);
+    const merged = {
+      project_id: body.project_id ?? existing.project_id,
+      duration: body.duration ?? existing.duration,
+      started_at: body.started_at ?? existing.started_at,
+      note: body.note !== undefined ? body.note : existing.note,
+      service_id: body.service_id !== undefined ? body.service_id : existing.service_id,
+      task_id: body.task_id !== undefined ? body.task_id : existing.task_id,
+      is_logged: body.is_logged ?? existing.is_logged,
+      billable: body.billable ?? existing.billable,
+      client_id: existing.client_id,
+    };
     const { data } = await this.http.put(
       `/timetracking/business/${this.businessId}/time_entries/${timeEntryId}`,
-      { time_entry: body }
+      { time_entry: merged }
     );
     return data.time_entry;
   }
