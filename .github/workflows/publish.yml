@@ -26,7 +26,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-${{ github.ref }}
+  # NOT parameterized by github.ref: two different tags each get their own
+  # ref, so a per-ref group would let their update-chart jobs race writing
+  # deploy/values.yaml on main (an older release could overwrite a newer
+  # one's image.tag). One shared group serializes all releases instead
+  # (Copilot review finding).
+  group: publish
   # Never cancel a half-finished release; queue instead.
   cancel-in-progress: false
 

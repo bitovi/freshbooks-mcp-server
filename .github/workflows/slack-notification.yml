@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       title:
-        description: "Main notification message line without emoji (e.g. 'new image has been published')"
+        description: "Main notification message line — omit any emoji, a status emoji (✅/❌) is appended automatically based on `status` (e.g. 'new image has been published')"
         required: true
         type: string
       detail:
