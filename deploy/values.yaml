@@ -74,8 +74,8 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
 
-# Mount the PVC declared in deploy/k8s/session-pvc.yaml (a 4th Argo CD
-# Application source) so the file-backed session store
+# Mount the PVC declared in deploy/chart/templates/pvc.yaml (a 4th Argo CD
+# Application source, its own small chart) so the file-backed session store
 # (~/.freshbooks-mcp/sessions.json, src/session-store.ts) survives pod
 # restarts instead of living on ephemeral container storage.
 extraVolumes:
