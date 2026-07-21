@@ -96,10 +96,10 @@ jobs:
           # doesn't have (Copilot review finding).
           fetch-depth: 0
 
-      - name: Install yq
-        uses: mikefarah/yq@v4.44.3
       - name: Write image tag into chart values
-        run: yq -i '.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
+        uses: mikefarah/yq@v4.44.3
+        with:
+          cmd: yq -i '.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
 
       - name: Commit and push (rebase-and-retry on races)
         env:
