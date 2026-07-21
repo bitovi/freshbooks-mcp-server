@@ -135,7 +135,11 @@ jobs:
             fi
             echo "Push rejected (attempt $attempt); rebasing and retrying..."
             git fetch origin "$DEPLOY_BRANCH"
-            git rebase "origin/${DEPLOY_BRANCH}"
+            if ! git rebase "origin/${DEPLOY_BRANCH}"; then
+              echo "Rebase failed; aborting." >&2
+              git rebase --abort || true
+              exit 1
+            fi
             sleep $((attempt * 2))
           done
           echo "Failed to push tag write-back after 5 attempts." >&2
