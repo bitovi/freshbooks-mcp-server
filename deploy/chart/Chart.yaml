@@ -1,0 +1,10 @@
+apiVersion: v2
+name: freshbooks-mcp-server-storage
+description: >-
+  Persistent volume for freshbooks-mcp-server's file-backed session store
+  (src/session-store.ts). A one-off, app-specific resource — not part of the
+  shared charts/container-workload or charts/platform-app-resources charts —
+  sourced as a 4th source on the Argo CD Application
+  (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml).
+type: application
+version: 0.1.0

@@ -5,8 +5,7 @@
 # a behavior change vs. the old EC2 deploy's persistent disk. Mounted into
 # the Deployment via deploy/values.yaml's extraVolumes/extraVolumeMounts
 # (both already supported by charts/container-workload -- no chart change
-# needed) and referenced as a 4th source on the Argo CD Application
-# (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml).
+# needed).
 #
 # ReadWriteOnce is fine: this app runs replicaCount: 1 with autoscaling
 # disabled (the session store's own docstring says "single-instance only").
