@@ -91,6 +91,8 @@ jobs:
         with:
           ref: ${{ env.DEPLOY_BRANCH }}
 
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.3
       - name: Write image tag into chart values
         run: yq -i '.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
 
