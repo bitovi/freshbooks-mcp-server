@@ -31,7 +31,7 @@ app:
 # Tag gate: with tag unset, no Deployment renders — a first sync creates only
 # the AWS resources plus Service/Ingress, and the workload appears once CI
 # pushes a vX.Y.Z image and writes the tag back here (see
-# .github/workflows/deploy.yml). Do not edit image.tag by hand.
+# .github/workflows/publish.yml). Do not edit image.tag by hand.
 image:
   tag: ''
 
