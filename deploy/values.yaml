@@ -73,3 +73,20 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
+
+# Mount the PVC declared in deploy/k8s/session-pvc.yaml (a 4th Argo CD
+# Application source) so the file-backed session store
+# (~/.freshbooks-mcp/sessions.json, src/session-store.ts) survives pod
+# restarts instead of living on ephemeral container storage.
+extraVolumes:
+  - name: sessions
+    persistentVolumeClaim:
+      claimName: freshbooks-mcp-server-sessions
+extraVolumeMounts:
+  - name: sessions
+    mountPath: /home/node/.freshbooks-mcp
+
+# fsGroup so the non-root `node` user (uid/gid 1000, see Dockerfile) can
+# write to the EBS-backed volume above, which mounts root-owned by default.
+podSecurityContext:
+  fsGroup: 1000
