@@ -46,11 +46,11 @@ jobs:
               - type: "section"
                 text:
                   type: "mrkdwn"
-                  text: "<${{ github.server_url }}/${{ github.repository }}|${{ inputs.service_name }}> *${{ inputs.environment }}* ${{ inputs.title }} ${{ inputs.status == 'success' && ':white_check_mark:' || ':x:' }}"
+                  text: ${{ toJSON(format('<{0}/{1}|{2}> *{3}* {4} {5}', github.server_url, github.repository, inputs.service_name, inputs.environment, inputs.title, inputs.status == 'success' && ':white_check_mark:' || ':x:')) }}
               - type: "section"
                 text:
                   type: "mrkdwn"
-                  text: "${{ inputs.detail }}"
+                  text: ${{ toJSON(inputs.detail) }}
               - type: "section"
                 text:
                   type: "mrkdwn"
@@ -67,7 +67,7 @@ jobs:
               - type: "section"
                 text:
                   type: "mrkdwn"
-                  text: "<${{ github.server_url }}/${{ github.repository }}|${{ inputs.service_name }}> *${{ inputs.environment }}* ${{ inputs.title }} ${{ inputs.status == 'success' && ':white_check_mark:' || ':x:' }}"
+                  text: ${{ toJSON(format('<{0}/{1}|{2}> *{3}* {4} {5}', github.server_url, github.repository, inputs.service_name, inputs.environment, inputs.title, inputs.status == 'success' && ':white_check_mark:' || ':x:')) }}
               - type: "section"
                 text:
                   type: "mrkdwn"

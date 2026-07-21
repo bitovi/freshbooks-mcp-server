@@ -153,7 +153,11 @@ jobs:
   notify:
     name: Slack Notification
     needs: [test, build-push, update-chart]
-    if: always()
+    # Skip (not fail) the whole job when SLACK_WEBHOOK_URL isn't configured
+    # yet -- slack-notification.yml requires it, so calling in without one
+    # would turn an otherwise-successful release into a failed run
+    # (Copilot review finding).
+    if: always() && secrets.SLACK_WEBHOOK_URL != ''
     uses: ./.github/workflows/slack-notification.yml
     with:
       status: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'success' || 'failure' }}
