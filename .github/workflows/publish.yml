@@ -38,16 +38,14 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # Adjust node-version to match your Dockerfile's runtime version.
-        node-version: [18.x, 20.x, 22.x]
     steps:
       - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
+      # Matches the Dockerfile's node:22-alpine — the only runtime this
+      # actually ships on, so no version matrix needed.
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22.x
           cache: npm
       - run: npm ci
       - run: npm test
@@ -142,3 +140,17 @@ jobs:
           done
           echo "Failed to push tag write-back after 5 attempts." >&2
           exit 1
+
+  notify:
+    name: Slack Notification
+    needs: [test, build-push, update-chart]
+    if: always()
+    uses: ./.github/workflows/slack-notification.yml
+    with:
+      status: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'success' || 'failure' }}
+      service_name: freshbooks-mcp-server
+      environment: production
+      title: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'release deployed' || 'release failed' }}
+      detail: "Tag: ${{ github.ref_name }}"
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
