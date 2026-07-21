@@ -142,17 +142,3 @@ jobs:
           done
           echo "Failed to push tag write-back after 5 attempts." >&2
           exit 1
-
-  notify:
-    name: Slack Notification
-    needs: [test, build-push, update-chart]
-    if: always()
-    uses: ./.github/workflows/slack-notification.yml
-    with:
-      status: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'success' || 'failure' }}
-      service_name: freshbooks-mcp-server
-      environment: production
-      title: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'release deployed' || 'release failed' }}
-      detail: "Tag: ${{ github.ref_name }}"
-    secrets:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
