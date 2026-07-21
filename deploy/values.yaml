@@ -1,0 +1,75 @@
+# Container app values file — consumed by TWO platform charts via Argo CD
+# Application ($values multi-source, see
+# bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml):
+#   - charts/container-workload  → Deployment/Service/Ingress/HPA
+#   - charts/platform-app-resources → ECR repository + GitHub OIDC push role
+# Each chart reads its own keys and ignores the rest.
+
+# Read by platform-app-resources (AWS footprint):
+kind: container
+
+app:
+  name: freshbooks-mcp-server
+  repo: bitovi/freshbooks-mcp-server
+  port: 3000
+  logLevel: info
+  healthPath: /health
+  # Name of the Secret that will be mounted via envFrom. Matches
+  # onePasswordItem.secretName below (left unset so it inherits this value).
+  envSecretName: freshbooks-mcp-server-secrets
+  # Plain (non-secret) environment variables. The legacy EC2 deploy bundled
+  # these into the same Secrets Manager blob as the real credentials
+  # (freshbooks-mcp-server-env), but none of the three are sensitive — MODE
+  # picks HTTP transport, HTTPS=false matches the ALB/ingress terminating TLS
+  # (see Dockerfile), and SERVER_URL must point at this app's own public host
+  # so the OAuth callback URI it constructs is correct.
+  env:
+    MODE: http
+    HTTPS: 'false'
+    SERVER_URL: https://freshbooks-mcp-server.bitovi-tools.com
+
+# Tag gate: with tag unset, no Deployment renders — a first sync creates only
+# the AWS resources plus Service/Ingress, and the workload appears once CI
+# pushes a vX.Y.Z image and writes the tag back here (see
+# .github/workflows/deploy.yml). Do not edit image.tag by hand.
+image:
+  tag: ''
+
+ingress:
+  # DNS and TLS are platform-automatic for *.bitovi-tools.com hosts:
+  # external-dns reconciles the record, the AWS Load Balancer Controller
+  # discovers the wildcard certificate (platform ADR 0002).
+  host: freshbooks-mcp-server.bitovi-tools.com
+  # Legacy ALB idle_timeout was deliberately set to 3600s "tuned for SSE"
+  # (this app serves claude.ai's custom-connector traffic over SSE/streamable
+  # HTTP) — replicate it here so long-lived connections aren't cut short by
+  # the platform's shorter shared default.
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+
+# Sync a 1Password item into a Kubernetes Secret. Requires the 1Password
+# operator (installed wave 10). Only true secrets go here — client IDs,
+# redirect URIs, and other public values belong in app.env above.
+onePasswordItem:
+  enabled: true
+  # Path format: vaults/<vault-name>/items/<item-title>
+  # The item's field LABELS become Secret keys, which are injected as env vars
+  # via envFrom. Create this item's fields labeled FRESHBOOKS_CLIENT_ID and
+  # FRESHBOOKS_CLIENT_SECRET, copied from the legacy Secrets Manager secret
+  # `freshbooks-mcp-server-env` in the `ai` AWS account (767397775295) — do
+  # NOT copy MODE/HTTPS/SERVER_URL from that secret, they're set in app.env
+  # above instead.
+  itemPath: 'vaults/bitovi-platform/items/freshbooks-mcp-server-secrets'
+  # secretName intentionally omitted — defaults to app.envSecretName above, so
+  # there is exactly one name to keep in sync (the Deployment's envFrom reads
+  # app.envSecretName; this OnePasswordItem's Secret must have that same name).
+  annotations:
+    operator.1password.io/auto-restart: 'true'
+
+replicaCount: 1
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80

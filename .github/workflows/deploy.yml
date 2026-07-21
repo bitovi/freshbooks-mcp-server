@@ -1,215 +1,150 @@
-name: Deploy to AWS EC2
+# Container app deploy workflow — canonical copy.
+#
+# Workflow: push vX.Y.Z tag → test → build+push to ECR → write tag into
+# deploy/values.yaml on main → Argo CD deploys that commit.
+#
+# The ECR repository (freshbooks-mcp-server) and the OIDC push role
+# (arn:aws:iam::486491621059:role/platform-managed/freshbooks-mcp-server-github-ecr-push)
+# are created by the platform master chart via the Argo CD Application
+# (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml). The same chart
+# also renders a per-app ClusterSecretStore + PushSecret that has External
+# Secrets Operator (ESO) push ECR_PUSH_ROLE_ARN and ECR_REPOSITORY into
+# this repo as Actions secrets automatically — nothing to configure by hand,
+# and nothing to derive at workflow runtime.
+
+name: Test, build, and deploy
 
 on:
   push:
-    branches: [deploy, main]
+    tags:
+      - "v*"
 
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  # Never cancel a half-finished release; queue instead.
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  # The branch Argo CD tracks — where the image tag is written back.
+  DEPLOY_BRANCH: 'main'
+
 jobs:
-  deploy:
-    name: Deploy FreshBooks MCP Server
+  test:
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ steps.outputs.outputs.app_url }}
-
+    strategy:
+      matrix:
+        # Adjust node-version to match your Dockerfile's runtime version.
+        node-version: [18.x, 20.x, 22.x]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
 
-      - name: Configure AWS Credentials
+  build-push:
+    needs: [test]
+    runs-on: ubuntu-latest
+    # Required for GitHub OIDC -> AWS AssumeRoleWithWebIdentity.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_AI }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_AI }}
-          aws-region: us-east-1
+          role-to-assume: ${{ secrets.ECR_PUSH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ secrets.ECR_REPOSITORY }}:${{ github.ref_name }}
+        run: |
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  update-chart:
+    needs: [build-push]
+    runs-on: ubuntu-latest
+    # GITHUB_TOKEN pushes to this same repo, so contents: write suffices — no
+    # PAT needed. CAVEAT: if main gains branch protection that blocks direct
+    # pushes, either allow github-actions[bot] to bypass it or swap the push
+    # below for a PR created with a bot/app token. actions: write lets the job
+    # cancel this run when there is nothing to deploy.
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
         with:
-          terraform_wrapper: false
+          ref: ${{ env.DEPLOY_BRANCH }}
 
-      - name: Terraform Init
-        working-directory: infra
-        run: terraform init
+      - name: Write image tag into chart values
+        run: yq -i '.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
 
-      - name: Terraform Plan
-        working-directory: infra
-        run: terraform plan -out=tfplan
-
-      - name: Terraform Apply
-        working-directory: infra
-        run: terraform apply -auto-approve tfplan
-
-      - name: Get Terraform Outputs
-        id: outputs
-        working-directory: infra
+      - name: Commit and push (rebase-and-retry on races)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
-          echo "sse_endpoint=$(terraform output -raw sse_endpoint)" >> "$GITHUB_OUTPUT"
-          echo "oauth_callback=$(terraform output -raw oauth_callback)" >> "$GITHUB_OUTPUT"
-          echo "instance_id=$(terraform output -raw instance_id)" >> "$GITHUB_OUTPUT"
-          echo "cloudwatch_log_group=$(terraform output -raw cloudwatch_log_group)" >> "$GITHUB_OUTPUT"
-          echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Package & Upload to S3
-        run: |
-          tar czf /tmp/app.tar.gz \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='infra' \
-            --exclude='.env' \
-            .
-          aws s3 cp /tmp/app.tar.gz s3://freshbooks-mcp-server-terraform-state/deploy/app.tar.gz
-          echo "✅ Uploaded app tarball to S3"
+          git add deploy/values.yaml
+          if git diff --cached --quiet; then
+            # values.yaml already carries this tag (usually a re-run of an
+            # already-successful release). Nothing will deploy, so don't
+            # finish green as if it did — cancel the run so the result is
+            # visibly "nothing happened".
+            echo "::notice::image.tag is already ${{ github.ref_name }} — nothing to deploy; cancelling this run."
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            # Cancellation is async — wait for it to take effect rather than
+            # racing past it. If it somehow doesn't land, fail rather than
+            # report a deploy that never happened.
+            gh run watch "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" || true
+            exit 1
+          fi
 
-      - name: Deploy Application via SSM
-        run: |
-          INSTANCE_ID="${{ steps.outputs.outputs.instance_id }}"
-          echo "Deploying to instance: $INSTANCE_ID"
+          # [skip ci] guards against retriggering branch-push workflows in
+          # this repo (this workflow itself only runs on tags, so it cannot
+          # loop on its own commit).
+          git commit -m "chore(release): deploy ${{ github.ref_name }} [skip ci]"
 
-          # Wait for SSM agent + bootstrap to be ready
-          echo "Waiting for instance bootstrap to complete..."
-          for i in $(seq 1 60); do
-            # First check SSM is online
-            SSM_STATUS=$(aws ssm describe-instance-information \
-              --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
-              --query 'InstanceInformationList[0].PingStatus' \
-              --output text 2>/dev/null || echo "None")
-            if [ "$SSM_STATUS" != "Online" ]; then
-              echo "Waiting for SSM agent... ($i/60)"
-              sleep 10
-              continue
+          # Rebase-and-retry: another workflow run (or a human) may have
+          # pushed to the branch between checkout and push.
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${DEPLOY_BRANCH}"; then
+              exit 0
             fi
-
-            # Then check bootstrap sentinel file
-            BOOTSTRAP_CMD=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunShellScript" \
-              --parameters '{"commands":["test -f /var/lib/bootstrap-complete && echo READY || echo PENDING"]}' \
-              --query 'Command.CommandId' \
-              --output text)
-            sleep 3
-            BOOTSTRAP_STATUS=$(aws ssm get-command-invocation \
-              --command-id "$BOOTSTRAP_CMD" \
-              --instance-id "$INSTANCE_ID" \
-              --query 'StandardOutputContent' \
-              --output text 2>/dev/null || echo "PENDING")
-            if echo "$BOOTSTRAP_STATUS" | grep -q "READY"; then
-              echo "✅ Instance bootstrap complete"
-              break
-            fi
-            echo "Waiting for bootstrap... ($i/60)"
-            sleep 10
+            echo "Push rejected (attempt $attempt); rebasing and retrying..."
+            git fetch origin "$DEPLOY_BRANCH"
+            git rebase "origin/${DEPLOY_BRANCH}"
+            sleep $((attempt * 2))
           done
+          echo "Failed to push tag write-back after 5 attempts." >&2
+          exit 1
 
-          # Deploy: download from S3, extract, run setup
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["aws s3 cp s3://freshbooks-mcp-server-terraform-state/deploy/app.tar.gz /tmp/app.tar.gz","cd /srv/freshbooks-mcp && tar xzf /tmp/app.tar.gz","bash /srv/freshbooks-mcp/scripts/setup.sh"]}' \
-            --timeout-seconds 300 \
-            --query 'Command.CommandId' \
-            --output text)
-
-          echo "SSM Command ID: $COMMAND_ID"
-
-          # Wait for deploy to complete (up to 5 min)
-          for i in $(seq 1 60); do
-            RESULT=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query 'Status' \
-              --output text 2>/dev/null || echo "Pending")
-            echo "Status: $RESULT ($i/60)"
-            if [ "$RESULT" = "Success" ]; then
-              echo "✅ Deploy succeeded!"
-              # Print the output
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardOutputContent' \
-                --output text 2>/dev/null || true
-              break
-            elif [ "$RESULT" = "Failed" ] || [ "$RESULT" = "Cancelled" ] || [ "$RESULT" = "TimedOut" ]; then
-              echo "❌ Deploy failed with status: $RESULT"
-              echo "--- STDOUT ---"
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardOutputContent' \
-                --output text 2>/dev/null || true
-              echo "--- STDERR ---"
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardErrorContent' \
-                --output text 2>/dev/null || true
-              echo "::error::SSM deploy command failed with status: $RESULT"
-              exit 1
-            fi
-            sleep 5
-          done
-
-      - name: Job Summary
-        if: always()
-        run: |
-          APP_URL="${{ steps.outputs.outputs.app_url }}"
-          SSE="${{ steps.outputs.outputs.sse_endpoint }}"
-          CALLBACK="${{ steps.outputs.outputs.oauth_callback }}"
-          CW_LOG="${{ steps.outputs.outputs.cloudwatch_log_group }}"
-          INSTANCE="${{ steps.outputs.outputs.instance_id }}"
-
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## 🚀 FreshBooks MCP Server — Deployment Complete
-
-          ### 🌐 Endpoints
-
-          | Endpoint | URL |
-          |----------|-----|
-          | **Application** | ${APP_URL} |
-          | **SSE (claude.ai)** | ${SSE} |
-          | **Health Check** | ${APP_URL}/health |
-          | **OAuth Callback** | ${CALLBACK} |
-
-          ---
-
-          ### 🔧 Setup Instructions
-
-          #### 1. Add OAuth Callback to FreshBooks
-          Go to [FreshBooks Developer Console](https://my.freshbooks.com/#/developer) and add this redirect URI:
-          \`\`\`
-          ${CALLBACK}
-          \`\`\`
-
-          #### 2. Connect to claude.ai
-          In claude.ai → **Settings → Integrations → Add Integration**, enter:
-          \`\`\`
-          ${SSE}
-          \`\`\`
-          Claude will walk you through the FreshBooks OAuth flow.
-
-          #### 3. Connect via AWS Session Manager
-          \`\`\`bash
-          aws ssm start-session --target ${INSTANCE} --region us-east-1
-          \`\`\`
-
-          #### 4. View Logs
-          \`\`\`bash
-          aws logs tail ${CW_LOG} --follow --region us-east-1
-          \`\`\`
-
-          ---
-
-          ### 📋 Infrastructure Details
-
-          | Resource | Value |
-          |----------|-------|
-          | EC2 Instance | \`${INSTANCE}\` |
-          | CloudWatch Logs | \`${CW_LOG}\` |
-          | Region | \`us-east-1\` |
-          | TLS | ACM certificate (auto-validated via Route53) |
-          | Load Balancer | ALB with 3600s idle timeout for SSE |
-          EOF
+  notify:
+    name: Slack Notification
+    needs: [test, build-push, update-chart]
+    if: always()
+    uses: ./.github/workflows/slack-notification.yml
+    with:
+      status: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'success' || 'failure' }}
+      service_name: freshbooks-mcp-server
+      environment: production
+      title: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'release deployed' || 'release failed' }}
+      detail: "Tag: ${{ github.ref_name }}"
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
