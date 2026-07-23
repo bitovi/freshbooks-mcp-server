@@ -1,12 +1,31 @@
 # Container app values file — consumed by TWO platform charts via Argo CD
 # Application ($values multi-source, see
 # bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml):
-#   - charts/container-workload  → Deployment/Service/Ingress/HPA
+#   - charts/container-workload  → Deployment/Service/Ingress/HPA, and (with
+#     crossplane.enabled below) the single ContainerApp XR covering both
+#     charts' resources
 #   - charts/platform-app-resources → ECR repository + GitHub OIDC push role
+#     in legacy (non-crossplane) mode; renders nothing while crossplane is
+#     enabled below
 # Each chart reads its own keys and ignores the rest.
 
 # Read by platform-app-resources (AWS footprint):
 kind: container
+
+# Crossplane cutover (ADR 0004 fleet migration; docs/operations/
+# crossplane-migration.md, Phase 4). container-workload renders one
+# platform.bitovi.com ContainerApp XR (charts/platform-api) covering
+# everything both charts would otherwise render — Deployment/Service/
+# Ingress/HPA/OnePasswordItem plus the AWS footprint (ECR/push-role) —
+# instead of the ACK-CR path; platform-app-resources then renders nothing
+# for this app. No importIds: this app has no pre-existing platform AWS
+# footprint to adopt, every external-name is convention-deterministic.
+crossplane:
+  enabled: true
+  # Keep true through migration soak — composed resources omit Delete from
+  # their managementPolicies. Flip false only after the app is confirmed
+  # stable.
+  deletionProtection: true
 
 app:
   name: freshbooks-mcp-server
