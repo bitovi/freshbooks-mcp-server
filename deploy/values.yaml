@@ -39,10 +39,17 @@ app:
   # picks HTTP transport, HTTPS=false matches the ALB/ingress terminating TLS
   # (see Dockerfile), and SERVER_URL must point at this app's own public host
   # so the OAuth callback URI it constructs is correct.
+  #
+  # TEMPORARY: pointed at the test domain below, not the final
+  # freshbooks-mcp-server.bitovi-tools.com, while this deployment is verified
+  # end to end with the legacy EC2/ALB stack still serving all real traffic,
+  # untouched. Must be flipped back to the final domain together with
+  # ingress.host below at real cutover (Phase 11, second pass) — see
+  # migration-tracking/freshbooks-mcp-server.md.
   env:
     MODE: http
     HTTPS: 'false'
-    SERVER_URL: https://freshbooks-mcp-server.bitovi-tools.com
+    SERVER_URL: https://freshbooks-mcp-server-test.bitovi-tools.com
 
 # Tag gate: with tag unset, no Deployment renders — a first sync creates only
 # the AWS resources plus Service/Ingress, and the workload appears once CI
@@ -54,8 +61,13 @@ image:
 ingress:
   # DNS and TLS are platform-automatic for *.bitovi-tools.com hosts:
   # external-dns reconciles the record, the AWS Load Balancer Controller
-  # discovers the wildcard certificate (platform ADR 0002).
-  host: freshbooks-mcp-server.bitovi-tools.com
+  # discovers the wildcard certificate (platform ADR 0002). The cert only
+  # covers one DNS label under bitovi-tools.com (ADR 0002), so this has to
+  # stay a single label - no nested subdomain.
+  #
+  # TEMPORARY test domain, not the final freshbooks-mcp-server.bitovi-tools.com
+  # - see the SERVER_URL comment above. Both change together at real cutover.
+  host: freshbooks-mcp-server-test.bitovi-tools.com
   # Legacy ALB idle_timeout was deliberately set to 3600s "tuned for SSE"
   # (this app serves claude.ai's custom-connector traffic over SSE/streamable
   # HTTP) — replicate it here so long-lived connections aren't cut short by
