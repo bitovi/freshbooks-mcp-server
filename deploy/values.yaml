@@ -1,120 +1,78 @@
-# Container app values file — consumed by TWO platform charts via Argo CD
-# Application ($values multi-source, see
-# bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml):
-#   - charts/container-workload → with crossplane.enabled below, renders one
-#     ContainerApp XR (charts/platform-api Composition expands it into
-#     Deployment/Service/Ingress/HPA/OnePasswordItem AND the AWS footprint)
-#   - charts/platform-app-resources → just the cluster-scoped ESO
-#     ClusterSecretStore (a namespaced XR can't compose that itself); the
-#     actual CI-secret Secret/PushSecret pair moves into the XR above
-# Each chart reads its own keys and ignores the rest.
+# Deploy settings for freshbooks-mcp-server — this file is the single
+# description of the whole app: what runs, what it needs, and what it's
+# called. The platform reads it via the Argo CD Application in
+# bitovi-platform-services (gitops/apps/freshbooks-mcp-server.yaml). Full
+# annotated spec, every field: bitovi-platform-services/charts/interface.yaml.
 
-# Read by platform-app-resources (AWS footprint):
-kind: container
+name: freshbooks-mcp-server
+repo: bitovi/freshbooks-mcp-server
 
-# Turns on the platform's current (Crossplane) provisioning path — standard
-# for every app onboarded via add-app/migrate-app now, not a special case
-# (docs/architecture/crossplane-platform.md; ADR 0004). No importIds: this
-# app has no pre-existing platform AWS footprint to adopt, every
-# external-name is convention-deterministic.
-crossplane:
-  enabled: true
-  # Keep true through migration soak — composed resources omit Delete from
-  # their managementPolicies. Flip false only after the app is confirmed
-  # stable.
+workloads:
+  # `main` keeps the bare project name — resources are just
+  # "freshbooks-mcp-server".
+  main:
+    kind: server
+    port: 3000
+    health: /health
+    # TEMPORARY: pointed at the test domain, not the final
+    # freshbooks-mcp-server.bitovi-tools.com, while this deployment is
+    # verified end to end with the legacy EC2/ALB stack still serving all
+    # real traffic, untouched. Must flip to the final domain together with
+    # SERVER_URL below at real cutover (Phase 11, second pass) — see
+    # migration-tracking/freshbooks-mcp-server.md in bitovi-platform-services.
+    domain: freshbooks-mcp-server-test.bitovi-tools.com
+    # Leave empty: the platform builds and hosts the image, and CI fills the
+    # tag in on release. The app doesn't run until the first vX.Y.Z tag is
+    # pushed and CI writes the tag back here. Don't edit by hand.
+    image: {}
+    env:
+      LOG_LEVEL: info
+      # The legacy EC2 deploy bundled these into the same Secrets Manager
+      # blob as the real credentials (freshbooks-mcp-server-env), but none
+      # of the three are sensitive — MODE picks HTTP transport, HTTPS=false
+      # matches the ALB/ingress terminating TLS (see Dockerfile), and
+      # SERVER_URL must point at this app's own public host so the OAuth
+      # callback URI it constructs is correct (must exactly match domain
+      # above).
+      MODE: http
+      HTTPS: 'false'
+      SERVER_URL: https://freshbooks-mcp-server-test.bitovi-tools.com
+    # Only true secrets go here — client IDs and other public values belong
+    # in env above. The item's field LABELS become env var names via
+    # envFrom: FRESHBOOKS_CLIENT_ID, FRESHBOOKS_CLIENT_SECRET.
+    secrets: op://bitovi-platform/freshbooks-mcp-server-secrets
+    replicas: 1
+    advanced:
+      # Legacy ALB idle_timeout was deliberately set to 3600s "tuned for
+      # SSE" (this app serves claude.ai's custom-connector traffic over
+      # SSE/streamable HTTP) — replicate it here so long-lived connections
+      # aren't cut short by the platform's shorter shared default.
+      ingressAnnotations:
+        alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+      # Mount the PVC declared in deploy/chart/templates/pvc.yaml (an extra
+      # Argo CD Application source, its own small chart) so the file-backed
+      # session store (~/.freshbooks-mcp/sessions.json,
+      # src/session-store.ts) survives pod restarts instead of living on
+      # ephemeral container storage. charts/interface doesn't render the PVC
+      # itself, only this mount (bitovi-platform-services#177 — merge that
+      # before/alongside this, or the volume silently won't attach).
+      volumes:
+        - name: sessions
+          persistentVolumeClaim:
+            claimName: freshbooks-mcp-server-sessions
+      volumeMounts:
+        - name: sessions
+          mountPath: /home/node/.freshbooks-mcp
+      # fsGroup so the non-root `node` user (uid/gid 1000, see Dockerfile)
+      # can write to the EBS-backed volume above, which mounts root-owned by
+      # default.
+      securityContext:
+        pod:
+          fsGroup: 1000
+
+infra:
+  hostedZone: bitovi-tools-com
+  # Keep true through migration soak — orphans rather than deletes AWS
+  # resources if something's removed. Flip false only after the app is
+  # confirmed stable.
   deletionProtection: true
-
-app:
-  name: freshbooks-mcp-server
-  repo: bitovi/freshbooks-mcp-server
-  port: 3000
-  logLevel: info
-  healthPath: /health
-  # Name of the Secret that will be mounted via envFrom. Matches
-  # onePasswordItem.secretName below (left unset so it inherits this value).
-  envSecretName: freshbooks-mcp-server-secrets
-  # Plain (non-secret) environment variables. The legacy EC2 deploy bundled
-  # these into the same Secrets Manager blob as the real credentials
-  # (freshbooks-mcp-server-env), but none of the three are sensitive — MODE
-  # picks HTTP transport, HTTPS=false matches the ALB/ingress terminating TLS
-  # (see Dockerfile), and SERVER_URL must point at this app's own public host
-  # so the OAuth callback URI it constructs is correct.
-  #
-  # TEMPORARY: pointed at the test domain below, not the final
-  # freshbooks-mcp-server.bitovi-tools.com, while this deployment is verified
-  # end to end with the legacy EC2/ALB stack still serving all real traffic,
-  # untouched. Must be flipped back to the final domain together with
-  # ingress.host below at real cutover (Phase 11, second pass) — see
-  # migration-tracking/freshbooks-mcp-server.md.
-  env:
-    MODE: http
-    HTTPS: 'false'
-    SERVER_URL: https://freshbooks-mcp-server-test.bitovi-tools.com
-
-# Tag gate: with tag unset, no Deployment renders — a first sync creates only
-# the AWS resources plus Service/Ingress, and the workload appears once CI
-# pushes a vX.Y.Z image and writes the tag back here (see
-# .github/workflows/publish.yml). Do not edit image.tag by hand.
-image:
-  tag: ''
-
-ingress:
-  # DNS and TLS are platform-automatic for *.bitovi-tools.com hosts:
-  # external-dns reconciles the record, the AWS Load Balancer Controller
-  # discovers the wildcard certificate (platform ADR 0002). The cert only
-  # covers one DNS label under bitovi-tools.com (ADR 0002), so this has to
-  # stay a single label - no nested subdomain.
-  #
-  # TEMPORARY test domain, not the final freshbooks-mcp-server.bitovi-tools.com
-  # - see the SERVER_URL comment above. Both change together at real cutover.
-  host: freshbooks-mcp-server-test.bitovi-tools.com
-  # Legacy ALB idle_timeout was deliberately set to 3600s "tuned for SSE"
-  # (this app serves claude.ai's custom-connector traffic over SSE/streamable
-  # HTTP) — replicate it here so long-lived connections aren't cut short by
-  # the platform's shorter shared default.
-  annotations:
-    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
-
-# Sync a 1Password item into a Kubernetes Secret. Requires the 1Password
-# operator (installed wave 10). Only true secrets go here — client IDs,
-# redirect URIs, and other public values belong in app.env above.
-onePasswordItem:
-  enabled: true
-  # Path format: vaults/<vault-name>/items/<item-title>
-  # The item's field LABELS become Secret keys, which are injected as env vars
-  # via envFrom. Create this item's fields labeled FRESHBOOKS_CLIENT_ID and
-  # FRESHBOOKS_CLIENT_SECRET, copied from the legacy Secrets Manager secret
-  # `freshbooks-mcp-server-env` in the `ai` AWS account (767397775295) — do
-  # NOT copy MODE/HTTPS/SERVER_URL from that secret, they're set in app.env
-  # above instead.
-  itemPath: 'vaults/bitovi-platform/items/freshbooks-mcp-server-secrets'
-  # secretName intentionally omitted — defaults to app.envSecretName above, so
-  # there is exactly one name to keep in sync (the Deployment's envFrom reads
-  # app.envSecretName; this OnePasswordItem's Secret must have that same name).
-  annotations:
-    operator.1password.io/auto-restart: 'true'
-
-replicaCount: 1
-
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 3
-  targetCPUUtilizationPercentage: 80
-
-# Mount the PVC declared in deploy/chart/templates/pvc.yaml (a 4th Argo CD
-# Application source, its own small chart) so the file-backed session store
-# (~/.freshbooks-mcp/sessions.json, src/session-store.ts) survives pod
-# restarts instead of living on ephemeral container storage.
-extraVolumes:
-  - name: sessions
-    persistentVolumeClaim:
-      claimName: freshbooks-mcp-server-sessions
-extraVolumeMounts:
-  - name: sessions
-    mountPath: /home/node/.freshbooks-mcp
-
-# fsGroup so the non-root `node` user (uid/gid 1000, see Dockerfile) can
-# write to the EBS-backed volume above, which mounts root-owned by default.
-podSecurityContext:
-  fsGroup: 1000

@@ -3,17 +3,16 @@
 # `publish.yml` to avoid clashing with the legacy deploy.yml name (that one
 # is now disabled — see its own header comment).
 #
-# Workflow: push vX.Y.Z tag → test → build+push to ECR → write tag into
-# deploy/values.yaml on main → Argo CD deploys that commit.
+# Workflow: push vX.Y.Z tag → test → build+push to ECR → write the tag into
+# deploy/values.yaml on main → Argo CD deploys that commit. The build/push/
+# write-back mechanics live in a shared reusable workflow in
+# bitovi-platform-services, so a fix reaches this repo by tag bump, not a PR.
 #
-# The ECR repository (freshbooks-mcp-server) and the OIDC push role
-# (arn:aws:iam::486491621059:role/platform-managed/freshbooks-mcp-server-github-ecr-push)
-# are created by the platform master chart via the Argo CD Application
-# (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml). The same chart
-# also renders a per-app ClusterSecretStore + PushSecret that has External
-# Secrets Operator (ESO) push ECR_PUSH_ROLE_ARN and ECR_REPOSITORY into
-# this repo as Actions secrets automatically — nothing to configure by hand,
-# and nothing to derive at workflow runtime.
+# The ECR repository (freshbooks-mcp-server) and the OIDC push role are
+# created by the platform via the Argo CD Application
+# (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml), and ESO
+# pushes ECR_PUSH_ROLE_ARN and ECR_REPOSITORY into this repo as Actions
+# secrets automatically — nothing to configure by hand.
 
 name: Publish
 
@@ -26,19 +25,9 @@ permissions:
   contents: read
 
 concurrency:
-  # NOT parameterized by github.ref: two different tags each get their own
-  # ref, so a per-ref group would let their update-chart jobs race writing
-  # deploy/values.yaml on main (an older release could overwrite a newer
-  # one's image.tag). One shared group serializes all releases instead
-  # (Copilot review finding).
-  group: publish
+  group: deploy-${{ github.ref }}
   # Never cancel a half-finished release; queue instead.
   cancel-in-progress: false
-
-env:
-  AWS_REGION: us-east-1
-  # The branch Argo CD tracks — where the image tag is written back.
-  DEPLOY_BRANCH: 'main'
 
 jobs:
   test:
@@ -55,115 +44,40 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  build-push:
+  release:
     needs: [test]
-    runs-on: ubuntu-latest
-    # Required for GitHub OIDC -> AWS AssumeRoleWithWebIdentity.
+    uses: bitovi/bitovi-platform-services/.github/workflows/container-build.yml@0.0.4
+    # A called workflow can only narrow permissions, never widen them, so the
+    # caller has to grant everything it needs: OIDC to AWS, the write-back
+    # commit, and cancelling the run when there is nothing to deploy.
     permissions:
       id-token: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.ECR_PUSH_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push image
-        env:
-          IMAGE: ${{ secrets.ECR_REPOSITORY }}:${{ github.ref_name }}
-        run: |
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-
-  update-chart:
-    needs: [build-push]
-    runs-on: ubuntu-latest
-    # GITHUB_TOKEN pushes to this same repo, so contents: write suffices — no
-    # PAT needed. CAVEAT: if main gains branch protection that blocks direct
-    # pushes, either allow github-actions[bot] to bypass it or swap the push
-    # below for a PR created with a bot/app token. actions: write lets the job
-    # cancel this run when there is nothing to deploy.
-    permissions:
       contents: write
       actions: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.DEPLOY_BRANCH }}
-          # Full history: the rebase-and-retry loop below needs commit
-          # ancestry to rebase cleanly, which a shallow (default) checkout
-          # doesn't have (Copilot review finding).
-          fetch-depth: 0
-
-      - name: Write image tag into chart values
-        uses: mikefarah/yq@v4.44.3
-        with:
-          cmd: yq -i '.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
-
-      - name: Commit and push (rebase-and-retry on races)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add deploy/values.yaml
-          if git diff --cached --quiet; then
-            # values.yaml already carries this tag (usually a re-run of an
-            # already-successful release). Nothing will deploy, so don't
-            # finish green as if it did — cancel the run so the result is
-            # visibly "nothing happened". Exit right after requesting the
-            # cancellation rather than watching this same run from inside
-            # itself, which can hang or race with the cancellation actually
-            # landing (Copilot review finding).
-            echo "::notice::image.tag is already ${{ github.ref_name }} — nothing to deploy; cancelling this run."
-            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
-            exit 0
-          fi
-
-          # [skip ci] guards against retriggering branch-push workflows in
-          # this repo (this workflow itself only runs on tags, so it cannot
-          # loop on its own commit).
-          git commit -m "chore(release): deploy ${{ github.ref_name }} [skip ci]"
-
-          # Rebase-and-retry: another workflow run (or a human) may have
-          # pushed to the branch between checkout and push.
-          for attempt in 1 2 3 4 5; do
-            if git push origin "HEAD:${DEPLOY_BRANCH}"; then
-              exit 0
-            fi
-            echo "Push rejected (attempt $attempt); rebasing and retrying..."
-            git fetch origin "$DEPLOY_BRANCH"
-            if ! git rebase "origin/${DEPLOY_BRANCH}"; then
-              echo "Rebase failed; aborting." >&2
-              git rebase --abort || true
-              exit 1
-            fi
-            sleep $((attempt * 2))
-          done
-          echo "Failed to push tag write-back after 5 attempts." >&2
-          exit 1
+    with:
+      values-file: deploy/values.yaml
+      # deploy/values.yaml is an app interface file — the tag lives on the
+      # workload, not at the legacy root .image.tag.
+      image-tag-path: .workloads.main.image.tag
+      # Tag the image with the release tag rather than the commit SHA.
+      image-tag: ${{ github.ref_name }}
+      deploy-branch: main
+      environment-label: release
+    secrets: inherit
 
   notify:
     name: Slack Notification
-    needs: [test, build-push, update-chart]
+    needs: [test, release]
     # Skip (not fail) the whole job when SLACK_WEBHOOK_URL isn't configured
     # yet -- slack-notification.yml requires it, so calling in without one
-    # would turn an otherwise-successful release into a failed run
-    # (Copilot review finding).
+    # would turn an otherwise-successful release into a failed run.
     if: always() && secrets.SLACK_WEBHOOK_URL != ''
     uses: ./.github/workflows/slack-notification.yml
     with:
-      status: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'success' || 'failure' }}
+      status: ${{ (needs.test.result == 'success' && needs.release.result == 'success') && 'success' || 'failure' }}
       service_name: freshbooks-mcp-server
       environment: production
-      title: ${{ (needs.test.result == 'success' && needs.build-push.result == 'success' && needs.update-chart.result == 'success') && 'release deployed' || 'release failed' }}
+      title: ${{ (needs.test.result == 'success' && needs.release.result == 'success') && 'release deployed' || 'release failed' }}
       detail: "Tag: ${{ github.ref_name }}"
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
