@@ -72,7 +72,3 @@ workloads:
 
 infra:
   hostedZone: bitovi-tools-com
-  # Keep true through migration soak — orphans rather than deletes AWS
-  # resources if something's removed. Flip false only after the app is
-  # confirmed stable.
-  deletionProtection: true
