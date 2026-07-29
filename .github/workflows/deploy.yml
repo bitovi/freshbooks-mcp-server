@@ -1,8 +1,13 @@
+# Legacy Terraform/SSM EC2 deploy. The platform release flow
+# (.github/workflows/publish.yml) now owns automatic deploys via `main`, so
+# this no longer triggers on push — it previously ran on every push to
+# `deploy`/`main`. Left runnable manually (Actions tab -> "Run workflow", or
+# `gh workflow run deploy.yml`) in case the legacy EC2 stack needs an
+# out-of-band redeploy before it's decommissioned.
 name: Deploy to AWS EC2
 
 on:
-  push:
-    branches: [deploy, main]
+  workflow_dispatch:
 
 permissions:
   contents: read

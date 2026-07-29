@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsc --noEmit",
     "dev": "node --env-file=.env --import tsx/esm src/index.ts",
     "start": "node --env-file=.env dist/index.js",
     "serve": "MODE=http node --env-file=.env dist/index.js",
