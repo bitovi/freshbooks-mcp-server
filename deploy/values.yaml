@@ -13,13 +13,14 @@ workloads:
     kind: server
     port: 3000
     health: /health
-    # TEMPORARY: pointed at the test domain, not the final
-    # freshbooks-mcp-server.bitovi-tools.com, while this deployment is
-    # verified end to end with the legacy EC2/ALB stack still serving all
-    # real traffic, untouched. Must flip to the final domain together with
-    # SERVER_URL below at real cutover (Phase 11, second pass) — see
-    # migration-tracking/freshbooks-mcp-server.md in bitovi-platform-services.
-    domain: freshbooks-mcp-server-test.bitovi-tools.com
+    # Real cutover (Phase 11, second pass — see
+    # migration-tracking/freshbooks-mcp-server.md in bitovi-platform-services):
+    # flipped from the temporary freshbooks-mcp-server-test.bitovi-tools.com
+    # domain to the final one, together with SERVER_URL below. Legacy
+    # EC2/ALB stack (freshbooks-mcp.bitovi-ai.com) still exists but no
+    # longer receives new traffic once the FreshBooks OAuth redirect and
+    # claude.ai connector URL are repointed here and DNS propagates.
+    domain: freshbooks-mcp-server.bitovi-tools.com
     # Leave empty: the platform builds and hosts the image, and CI fills the
     # tag in on release. The app doesn't run until the first vX.Y.Z tag is
     # pushed and CI writes the tag back here. Don't edit by hand.
@@ -36,7 +37,7 @@ workloads:
       # above).
       MODE: http
       HTTPS: 'false'
-      SERVER_URL: https://freshbooks-mcp-server-test.bitovi-tools.com
+      SERVER_URL: https://freshbooks-mcp-server.bitovi-tools.com
     # Only true secrets go here — client IDs and other public values belong
     # in env above. The item's field LABELS become env var names via
     # envFrom: FRESHBOOKS_CLIENT_ID, FRESHBOOKS_CLIENT_SECRET.
