@@ -6,7 +6,6 @@
 
 name: freshbooks-mcp-server
 repo: bitovi/freshbooks-mcp-server
-
 workloads:
   # `main` keeps the bare project name — resources are just
   # "freshbooks-mcp-server".
@@ -24,7 +23,8 @@ workloads:
     # Leave empty: the platform builds and hosts the image, and CI fills the
     # tag in on release. The app doesn't run until the first vX.Y.Z tag is
     # pushed and CI writes the tag back here. Don't edit by hand.
-    image: {}
+    image:
+      tag: v0.0.4
     env:
       LOG_LEVEL: info
       # The legacy EC2 deploy bundled these into the same Secrets Manager
@@ -69,6 +69,5 @@ workloads:
       securityContext:
         pod:
           fsGroup: 1000
-
 infra:
   hostedZone: bitovi-tools-com
