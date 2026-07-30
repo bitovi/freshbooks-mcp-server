@@ -6,7 +6,9 @@
 # Workflow: push vX.Y.Z tag → test → build+push to ECR → write the tag into
 # deploy/values.yaml on main → Argo CD deploys that commit. The build/push/
 # write-back mechanics live in a shared reusable workflow in
-# bitovi-platform-services, so a fix reaches this repo by tag bump, not a PR.
+# bitovi/platform-ci, so a fix reaches this repo by tag bump, not a PR. That
+# repo is public because a public app repo -- this one -- cannot call a
+# reusable workflow held in a private one.
 #
 # The ECR repository (freshbooks-mcp-server) and the OIDC push role are
 # created by the platform via the Argo CD Application
@@ -46,7 +48,7 @@ jobs:
 
   release:
     needs: [test]
-    uses: bitovi/bitovi-platform-services/.github/workflows/container-build.yml@0.0.4
+    uses: bitovi/platform-ci/.github/workflows/container-build.yml@0.0.1
     # A called workflow can only narrow permissions, never widen them, so the
     # caller has to grant everything it needs: OIDC to AWS, the write-back
     # commit, and cancelling the run when there is nothing to deploy.
