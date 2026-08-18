@@ -1,0 +1,74 @@
+# Deploy settings for freshbooks-mcp-server — this file is the single
+# description of the whole app: what runs, what it needs, and what it's
+# called. The platform reads it via the Argo CD Application in
+# bitovi-platform-services (gitops/apps/freshbooks-mcp-server.yaml). Full
+# annotated spec, every field: bitovi-platform-services/charts/interface.yaml.
+
+name: freshbooks-mcp-server
+repo: bitovi/freshbooks-mcp-server
+workloads:
+  # `main` keeps the bare project name — resources are just
+  # "freshbooks-mcp-server".
+  main:
+    kind: server
+    port: 3000
+    health: /health
+    # Real cutover (Phase 11, second pass — see
+    # migration-tracking/freshbooks-mcp-server.md in bitovi-platform-services):
+    # flipped from the temporary freshbooks-mcp-server-test.bitovi-tools.com
+    # domain to the final one, together with SERVER_URL below. Legacy
+    # EC2/ALB stack (freshbooks-mcp.bitovi-ai.com) still exists but no
+    # longer receives new traffic once the FreshBooks OAuth redirect and
+    # claude.ai connector URL are repointed here and DNS propagates.
+    domain: freshbooks-mcp-server.bitovi-tools.com
+    # Leave empty: the platform builds and hosts the image, and CI fills the
+    # tag in on release. The app doesn't run until the first vX.Y.Z tag is
+    # pushed and CI writes the tag back here. Don't edit by hand.
+    image:
+      tag: v0.0.4
+    env:
+      LOG_LEVEL: info
+      # The legacy EC2 deploy bundled these into the same Secrets Manager
+      # blob as the real credentials (freshbooks-mcp-server-env), but none
+      # of the three are sensitive — MODE picks HTTP transport, HTTPS=false
+      # matches the ALB/ingress terminating TLS (see Dockerfile), and
+      # SERVER_URL must point at this app's own public host so the OAuth
+      # callback URI it constructs is correct (must exactly match domain
+      # above).
+      MODE: http
+      HTTPS: 'false'
+      SERVER_URL: https://freshbooks-mcp-server.bitovi-tools.com
+    # Only true secrets go here — client IDs and other public values belong
+    # in env above. The item's field LABELS become env var names via
+    # envFrom: FRESHBOOKS_CLIENT_ID, FRESHBOOKS_CLIENT_SECRET.
+    secrets: op://bitovi-platform/freshbooks-mcp-server-secrets
+    replicas: 1
+    advanced:
+      # Legacy ALB idle_timeout was deliberately set to 3600s "tuned for
+      # SSE" (this app serves claude.ai's custom-connector traffic over
+      # SSE/streamable HTTP) — replicate it here so long-lived connections
+      # aren't cut short by the platform's shorter shared default.
+      ingressAnnotations:
+        alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+      # Mount the PVC declared in deploy/chart/templates/pvc.yaml (an extra
+      # Argo CD Application source, its own small chart) so the file-backed
+      # session store (~/.freshbooks-mcp/sessions.json,
+      # src/session-store.ts) survives pod restarts instead of living on
+      # ephemeral container storage. charts/interface doesn't render the PVC
+      # itself, only this mount (bitovi-platform-services#177 — merge that
+      # before/alongside this, or the volume silently won't attach).
+      volumes:
+        - name: sessions
+          persistentVolumeClaim:
+            claimName: freshbooks-mcp-server-sessions
+      volumeMounts:
+        - name: sessions
+          mountPath: /home/node/.freshbooks-mcp
+      # fsGroup so the non-root `node` user (uid/gid 1000, see Dockerfile)
+      # can write to the EBS-backed volume above, which mounts root-owned by
+      # default.
+      securityContext:
+        pod:
+          fsGroup: 1000
+infra:
+  hostedZone: bitovi-tools-com

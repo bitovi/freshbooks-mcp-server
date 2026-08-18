@@ -1,0 +1,92 @@
+# Container app release workflow — canonical copy (bitovi-platform-services
+# .github/skills/add-app/assets/workflow-container-deploy.yml), renamed
+# `publish.yml` to avoid clashing with the legacy deploy.yml name (that one
+# is now disabled — see its own header comment).
+#
+# Workflow: push vX.Y.Z tag → test → build+push to ECR → write the tag into
+# deploy/values.yaml on main → Argo CD deploys that commit. The build/push/
+# write-back mechanics live in a shared reusable workflow in
+# bitovi/platform-ci, so a fix reaches this repo by tag bump, not a PR. That
+# repo is public because a public app repo -- this one -- cannot call a
+# reusable workflow held in a private one.
+#
+# The ECR repository (freshbooks-mcp-server) and the OIDC push role are
+# created by the platform via the Argo CD Application
+# (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml), and ESO
+# pushes ECR_PUSH_ROLE_ARN and ECR_REPOSITORY into this repo as Actions
+# secrets automatically — nothing to configure by hand.
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  # Never cancel a half-finished release; queue instead.
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Matches the Dockerfile's node:22-alpine — the only runtime this
+      # actually ships on, so no version matrix needed.
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  release:
+    needs: [test]
+    uses: bitovi/platform-ci/.github/workflows/container-build.yml@0.0.1
+    # A called workflow can only narrow permissions, never widen them, so the
+    # caller has to grant everything it needs: OIDC to AWS, the write-back
+    # commit, and cancelling the run when there is nothing to deploy.
+    permissions:
+      id-token: write
+      contents: write
+      actions: write
+    with:
+      values-file: deploy/values.yaml
+      # deploy/values.yaml is an app interface file — the tag lives on the
+      # workload, not at the legacy root .image.tag.
+      image-tag-path: .workloads.main.image.tag
+      # Tag the image with the release tag rather than the commit SHA.
+      image-tag: ${{ github.ref_name }}
+      deploy-branch: main
+      # The write-back commit *is* the deploy, and main requires pull requests
+      # -- its ruleset bypasses only OrganizationAdmin and Integration actors,
+      # so GITHUB_TOKEN cannot push there. Pushing as a GitHub App (an
+      # Integration actor) is what gets the tag onto main. Empty falls back to
+      # GITHUB_TOKEN, which builds the image and then fails the write-back.
+      writeback-app-id: ${{ vars.CI_WRITEBACK_APP_ID }}
+      environment-label: release
+    secrets: inherit
+
+  notify:
+    name: Slack Notification
+    needs: [test, release]
+    # Runs whatever the outcome, so a failed release notifies too. Needs
+    # SLACK_WEBHOOK_URL set on this repo -- slack-notification.yml declares it
+    # required, and a job-level `if:` cannot read the `secrets` context to
+    # guard on it (only github, needs, vars and inputs are available there).
+    if: always()
+    uses: ./.github/workflows/slack-notification.yml
+    with:
+      status: ${{ (needs.test.result == 'success' && needs.release.result == 'success') && 'success' || 'failure' }}
+      service_name: freshbooks-mcp-server
+      environment: production
+      title: ${{ (needs.test.result == 'success' && needs.release.result == 'success') && 'release deployed' || 'release failed' }}
+      detail: "Tag: ${{ github.ref_name }}"
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
