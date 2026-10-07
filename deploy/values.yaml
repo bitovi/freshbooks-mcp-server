@@ -1,7 +1,7 @@
 # Deploy settings for freshbooks-mcp-server — this file is the single
 # description of the whole app: what runs, what it needs, and what it's
-# called. The platform reads it via the Argo CD Application in
-# bitovi-platform-services (gitops/apps/freshbooks-mcp-server.yaml). Full
+# called. The platform reads it via the tenant-apps ApplicationSet
+# (bitovi/platform-apps, apps/freshbooks-mcp-server.yaml). Full
 # annotated spec, every field: bitovi-platform-services/charts/interface.yaml.
 
 name: freshbooks-mcp-server
@@ -67,9 +67,7 @@ workloads:
       securityContext:
         pod:
           fsGroup: 1000
-# The session-store PVC, freshbooks-mcp-server-sessions. Same spec as the
-# claim deploy/chart rendered, so Argo CD adopts the live claim. deploy/chart
-# goes once the app moves to the tenant-apps ApplicationSet (SYSTEMS-953).
+# The session-store PVC, freshbooks-mcp-server-sessions.
 dependencies:
   sessions:
     type: volume

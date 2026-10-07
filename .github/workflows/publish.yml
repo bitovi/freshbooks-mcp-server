@@ -11,8 +11,8 @@
 # reusable workflow held in a private one.
 #
 # The ECR repository (freshbooks-mcp-server) and the OIDC push role are
-# created by the platform via the Argo CD Application
-# (bitovi-platform-services/gitops/apps/freshbooks-mcp-server.yaml), and ESO
+# created by the platform via the tenant-apps ApplicationSet
+# (bitovi/platform-apps, apps/freshbooks-mcp-server.yaml), and ESO
 # pushes ECR_PUSH_ROLE_ARN and ECR_REPOSITORY into this repo as Actions
 # secrets automatically — nothing to configure by hand.
 
