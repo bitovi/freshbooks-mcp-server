@@ -50,13 +50,10 @@ workloads:
       # aren't cut short by the platform's shorter shared default.
       ingressAnnotations:
         alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
-      # Mount the PVC declared in deploy/chart/templates/pvc.yaml (an extra
-      # Argo CD Application source, its own small chart) so the file-backed
-      # session store (~/.freshbooks-mcp/sessions.json,
+      # Mount the PVC from the `sessions` pvc dependency below so the
+      # file-backed session store (~/.freshbooks-mcp/sessions.json,
       # src/session-store.ts) survives pod restarts instead of living on
-      # ephemeral container storage. charts/interface doesn't render the PVC
-      # itself, only this mount (bitovi-platform-services#177 — merge that
-      # before/alongside this, or the volume silently won't attach).
+      # ephemeral container storage.
       volumes:
         - name: sessions
           persistentVolumeClaim:
@@ -70,5 +67,13 @@ workloads:
       securityContext:
         pod:
           fsGroup: 1000
+# The session-store PVC, freshbooks-mcp-server-sessions. Same spec as the
+# claim deploy/chart rendered, so Argo CD adopts the live claim. deploy/chart
+# goes once the app moves to the tenant-apps ApplicationSet (SYSTEMS-953).
+dependencies:
+  sessions:
+    type: pvc
+    storage: 1Gi
+    storageClass: gp3
 infra:
   hostedZone: bitovi-tools-com
