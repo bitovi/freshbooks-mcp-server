@@ -50,7 +50,7 @@ workloads:
       # aren't cut short by the platform's shorter shared default.
       ingressAnnotations:
         alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
-      # Mount the PVC from the `sessions` volume dependency below so the
+      # Mount the PVC from the `sessions` pvc dependency below so the
       # file-backed session store (~/.freshbooks-mcp/sessions.json,
       # src/session-store.ts) survives pod restarts instead of living on
       # ephemeral container storage.
@@ -72,7 +72,7 @@ workloads:
 # goes once the app moves to the tenant-apps ApplicationSet (SYSTEMS-953).
 dependencies:
   sessions:
-    type: volume
+    type: pvc
     storage: 1Gi
     storageClass: gp3
 infra:
